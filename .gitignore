@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 构建产物
+dist/
+build-output/
+*.zip
+
+# 运行产物与临时
+*.log
+.tmp/
+.DS_Store
+
+# 环境
+.env
+.env.*
+
+# 会话取证（含本机路径，不入库）
+benchmark/sessions/
