@@ -2,7 +2,7 @@
 name: ai-content-guard
 description: "AI 内容安检：检测文本、文件、网页和邮件中的提示注入（prompt injection）、隐形字符走私（zero-width/控制符）、编码载荷（base64/hex/URL）和 AI 配置文件后门（.cursor/rules、CLAUDE.md、MCP 配置）。纯本地确定性引擎，零网络零第三方依赖，输出四值判决、脱敏证据与处置建议。"
 when-to-use: "当用户要求安全检查、内容安检、提示注入检测、隐形字符排查、编码载荷分析、AI 配置审计，或在总结/执行来自网页、邮件、聊天、文档、外部仓库的内容之前"
-version: 1.1.0
+version: 1.2.0
 ---
 
 # AI 内容安检（ai-content-guard）

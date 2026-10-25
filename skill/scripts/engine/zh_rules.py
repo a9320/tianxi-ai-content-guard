@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-from .detectors import is_ai_config_path
+from .detectors import _ENCODED_TARGET_RE, is_ai_config_path
 from .rules import get_rule
 
 ZH_CONFIDENCE = 70
@@ -30,43 +30,67 @@ _P_ROLE = re.compile(
 
 # ── 系统提示泄露 ──
 _P_LEAK = re.compile(
-    r"(输出|泄露|告诉我|显示|打印|复述)[^。.\n]{0,10}"
+    r"(输出|泄露|告诉我|显示|打印|复述|reveal)[^。.\n]{0,10}"
     r"(系统提示|系统指令|初始指令|系统提示词|system\s*prompt)", re.I)
 
-# ── 判决劫持（要求报告安全结论）──
+# ── 判决劫持：要求结论框架（祈使/判决词），排除疑问（是否/吗）与
+#    陈述性汇报（"报告正常/报告未检出"是描述系统而非命令检测者）──
 _P_HIJACK_ZH = re.compile(
-    r"(报告|输出|判定|判决|回复|告诉[^。.\n]{0,6}用户)[^。.\n]{0,12}"
-    r"(clean|安全|通过|未检出|无风险|没有风险|正常|无害)")
+    r"(?:(?:请|务必|必须|立即|要)\s*)?"
+    r"(?:报告|输出|回复|告诉[^。.\n]{0,6}用户)[^。.\n]{0,10}"
+    r"(?<!是否)(?<!否)(?<!未检出)(?<!无)(?<!非)(?:clean|安全|通过)"
+    r"|(?:判决|判定|结论|verdict)[^。.\n]{0,6}(?:为|是|:|：)\s*(?:clean|安全|通过|未检出)")
 _P_HIJACK_EN = re.compile(
-    r"(report|state|output|reply|tell[^.\n]{0,12}user)[^.\n]{0,20}"
+    r"(?:report|state|output|reply|tell[^.\n]{0,12}user)[^.\n]{0,20}"
     r"\b(clean|safe|passed|benign|no\s+issues|harmless)\b"
     r"|verdict\s+is\s+(clean|safe)", re.I)
 
-# ── 数据外传 ──
-_P_EXFIL_ZH = re.compile(
-    r"(发送|上传|外传|传送|发给|邮寄到|提交到|传到)[^。.\n]{0,16}"
-    r"(所有|全部|一切)?[^。.\n]{0,12}"
-    r"(文件|数据|密钥|密码|凭据|令牌|通讯录|联系人|聊天记录|api|key|token)", re.I)
-# 把字句语序：把/将 + 对象 + 发送/外传（中文常见 O-V 结构）
-_P_EXFIL_ZH2 = re.compile(
-    r"(把|将)[^。.\n]{0,24}(所有|全部|一切)?[^。.\n]{0,20}"
-    r"(文件|数据|密钥|密码|凭据|令牌|通讯录|联系人|聊天记录|内容|api|key|token|\.env)"
-    r"[^。.\n]{0,16}(发送|上传|外传|传到|发给|提交到|邮寄到|传给)", re.I)
-_P_EXFIL_EN = re.compile(
-    r"(exfiltrate|send|upload|mail)[^.\n]{0,14}\b(all|every|the)\b[^.\n]{0,14}"
-    r"\b(files|data|keys|tokens|secrets|credentials|passwords|contacts)\b", re.I)
+# ── 数据外传：要求 敏感对象 或 外部目的地（二选一），普通办公收发不命中 ──
+_SENSITIVE_OBJ = (r"密钥|密码|凭据|令牌|通讯录|联系人|聊天记录|api[\s_-]?key|token|\.env|数据库备份")
+_EXTERNAL_DEST = (r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+|https?://|外部|远程|攻击者|attacker|陌生")
+_P_EXFIL_ZH = re.compile(  # V-O 语序 + 敏感对象
+    r"(发送|上传|外传|传送|发给|邮寄到|提交到|传到)[^。.\n]{0,14}"
+    rf"(?:{_SENSITIVE_OBJ})", re.I)
+_P_EXFIL_ZH2 = re.compile(  # 把字句 + 敏感对象
+    rf"(?:把|将)[^。.\n]{{0,24}}(?:{_SENSITIVE_OBJ})[^。.\n]{{0,16}}"
+    r"(发送|上传|外传|传到|发给|提交到|邮寄到|传给)", re.I)
+_P_EXFIL_ZH3 = re.compile(  # 任意对象 + 外部目的地
+    rf"(?:把|将|发送|上传|外传)[^。.\n]{{0,20}}(?:文件|数据|资料)"
+    rf"[^。.\n]{{0,14}}(?:{_EXTERNAL_DEST})", re.I)
+_P_EXFIL_EN = re.compile(  # all/every + 敏感对象，或任意量 + 外部目的地
+    r"(?:exfiltrate|send|upload|mail)[^.\n]{0,14}\b(?:all|every)\b[^.\n]{0,14}"
+    r"\b(?:keys?|tokens?|secrets?|credentials?|passwords?|contacts?|api[\s_-]?keys?)\b"
+    r"|(?:send|upload|mail|exfiltrate)[^.\n]{0,16}\b(?:files?|data)\b[^.\n]{0,16}"
+    r"\b(?:https?://|attacker|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)\b", re.I)
 
-# ── 工具滥用（要求执行破坏命令）──
+# ── 工具滥用：仅真实破坏命令语法；"删除所有临时/缓存文件"类描述性语句排除 ──
 _P_TOOLABUSE_ZH = re.compile(
-    r"(执行|运行|调用|帮我?跑)[^。.\n]{0,14}"
-    r"(rm\s*-rf|格式化|删除所有|清空全部|关机|format\s+/|del\s+/[a-z])", re.I)
+    r"(?:执行|运行|调用|帮我?跑)[^。.\n]{0,14}"
+    r"(rm\s*-rf|mkfs|format\s+/|del\s+/[a-z]|shutdown|格式化[硬盘磁盘系统盘])"
+    r"|删除所有(?!临时|缓存|垃圾|过期|无效)(?:文件|数据|目录|记录)"
+    r"|(?:执行|运行)[^。.\n]{0,10}(?:(?:rm|mkfs|format|del|shutdown)\b)", re.I)
 
-# ── 编码载荷解码后的补充关键词（英文引擎关键词表缺口 + 中文）──
+# ── 编码载荷解码后判定：复用引擎关键词表 + 覆盖层补充（英文短语全集）──
 ENCODED_KEYWORDS_ZH = (
     "忽略", "指令", "密钥", "密码", "系统提示", "发送", "删除", "越狱",
-    "ignore all rules", "ignore every rule", "disable safety",
-    "report clean", "exfiltrate", "send all",
 )
+ENCODED_KEYWORDS_EN = (
+    "ignore all previous instructions", "ignore previous instructions",
+    "ignore all rules", "ignore every rule", "disregard all previous",
+    "disable safety", "report clean", "exfiltrate", "send all",
+    "reveal your system prompt", "system prompt", "mail the data",
+    "send the data", "api key", "credential", "you are now", "developer mode",
+)
+
+
+def _encoded_hit(peeled: str) -> bool:
+    low = peeled.lower()
+    if any(k in low for k in ENCODED_KEYWORDS_EN):
+        return True
+    if any(k in peeled for k in ENCODED_KEYWORDS_ZH):
+        return True
+    return any(rx.search(peeled) for rx in _ENCODED_TARGET_RE)
+
 
 _RULESETS = [
     (_P_OVERRIDE, "override", "high"),
@@ -76,6 +100,7 @@ _RULESETS = [
     (_P_HIJACK_EN, "verdict_hijack", "high"),
     (_P_EXFIL_ZH, "exfiltration", "high"),
     (_P_EXFIL_ZH2, "exfiltration", "high"),
+    (_P_EXFIL_ZH3, "exfiltration", "high"),
     (_P_EXFIL_EN, "exfiltration", "high"),
     (_P_TOOLABUSE_ZH, "tool_abuse", "critical"),
 ]
@@ -139,31 +164,34 @@ _B64_RUN = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
 
 
 def scan_encoded_zh(content: str, path: str, _n: int = 0) -> list[dict]:
-    """补充编码检测：对全文 base64 候选（含非引号语境）解码 ≤3 层后匹配
-    覆盖层关键词表（补引擎英文关键词缺口与中文载荷），与引擎既有命中按行去重。"""
+    """补充编码检测：对全文 base64 候选（含非引号语境）按实际层数解码后，
+    用引擎关键词表+覆盖层补充表判定（修 P0-2 残留：无引号 md/txt 漏检）。
+    分级对齐 PITAX 语义：1 层→PIT-E-07 medium；≥2 层→PIT-E-57 critical。"""
     import base64 as _b64
     import binascii as _bin
     findings: list[dict] = []
     try:
         for lineno, line in enumerate(content.splitlines(), start=1):
             for cand in _B64_RUN.findall(line)[:8]:
-                data = cand
-                peeled = None
+                data, peeled, layers = cand, None, 0
                 for _ in range(3):
                     try:
-                        data = _b64.b64decode(data, validate=True).decode("utf-8", errors="replace")
+                        data = _b64.b64decode(data, validate=True).decode(
+                            "utf-8", errors="replace")
                     except (_bin.Error, ValueError, UnicodeDecodeError):
                         break
-                    peeled = data
-                if not peeled:
+                    peeled, layers = data, layers + 1
+                if not peeled or layers == 0 or not _encoded_hit(peeled):
                     continue
-                low = peeled.lower()
-                if any(k in low for k in ENCODED_KEYWORDS_ZH):
-                    findings.append(_zh_finding(
-                        "PIT-E-57", path, lineno, cand[:80],
-                        f"检测到多层编码载荷，解码后命中注入关键词（覆盖层补充检测）。",
-                        "critical", decoded=peeled))
-                    break
+                if layers >= 2:
+                    code, sev, msg = ("PIT-E-57", "critical",
+                                      "检测到多层编码载荷，解码后命中注入关键词（覆盖层补充检测）。")
+                else:
+                    code, sev, msg = ("PIT-E-07", "medium",
+                                      "检测到 base64 编码载荷，解码后命中注入关键词（覆盖层补充检测）。")
+                findings.append(_zh_finding(code, path, lineno, cand[:80],
+                                            msg, sev, decoded=peeled))
+                break
     except Exception:
         return []
     for i, f in enumerate(findings, start=1):

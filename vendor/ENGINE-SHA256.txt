@@ -4,4 +4,4 @@
 80cf72d034133ba77eae2a728b68418f97b870e1bfe7575660216792c8f08784  skill/scripts/engine/sanitizer.py
 c3882e5f568a8da59bedaa213c4d26d00b532a23aff02886d7fdc9739d657336  skill/scripts/engine/sarif.py
 d0120206eed7acfcadbd145a23c3fd014defa14eaf9ce241f7b40af4815955a7  skill/scripts/engine/scan.py
-40bfc9a7d69314855ae0970559c6e06fd9ffd6cb15e5ad0f55c37ebc6dbca880  skill/scripts/engine/zh_rules.py
+d771d7e0b797f81e829f88678bc3a0f616dbdac145ffd81d1d524c1e7f1513d1  skill/scripts/engine/zh_rules.py

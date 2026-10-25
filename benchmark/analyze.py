@@ -84,6 +84,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--since", help="ISO 时间，如 2026-10-25T10:00")
     ap.add_argument("--minutes", type=int, help="只统计最近 N 分钟")
+    ap.add_argument("--exclude-session", action="append", default=[],
+                    help="排除指定会话（文件名含此 ID 即排除，可多次）")
+    ap.add_argument("--exclude-window", action="append", default=[],
+                    help="排除时间窗 START,END（ISO，如 2026-10-25T14:49,2026-10-25T15:00，可多次）")
     args = ap.parse_args()
     if args.minutes:
         since = dt.datetime.now() - dt.timedelta(minutes=args.minutes)
@@ -92,8 +96,21 @@ def main() -> int:
     else:
         since = dt.datetime.now() - dt.timedelta(hours=6)
 
+    def _excluded(s) -> bool:
+        if any(sid in s["file"] for sid in args.exclude_session):
+            return True
+        for w in args.exclude_window:
+            try:
+                a, b = w.split(",")
+                if dt.datetime.fromisoformat(a) <= s["mtime"] <= dt.datetime.fromisoformat(b):
+                    return True
+            except ValueError:
+                continue
+        return False
+
     cases = json.loads((REPO / "benchmark" / "cases.json").read_text(encoding="utf-8"))["cases"]
-    sessions = sorted(iter_sessions(since), key=lambda s: s["mtime"])
+    sessions = [s for s in sorted(iter_sessions(since), key=lambda s: s["mtime"])
+                if not _excluded(s)]
     print(f"窗口内会话：{len(sessions)}（自 {since.isoformat(timespec='minutes')}）\n")
     for s in sessions:
         mark = "✅触发" if s["triggered"] else "—"

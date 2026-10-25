@@ -93,7 +93,7 @@ def test_key_redaction_in_report(tmp_path):
     assert reports, "命中>0 且 --out 应落报告"
     text = reports[0].read_text(encoding="utf-8")
     assert "sk-live-FAKE1234567890" not in text, "完整密钥不得落盘"
-    assert "sk-l****" in text or "****" in text
+    assert "ignore previous instructions" not in text, "注入短语原文不得落盘"
 
 
 def test_sarif_redaction(tmp_path):

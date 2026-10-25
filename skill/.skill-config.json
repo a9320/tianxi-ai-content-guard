@@ -2,7 +2,7 @@
   "name": "ai-content-guard",
   "description": "AI 内容安检：本地检测提示注入、隐形字符、编码载荷和 AI 配置文件后门（纯本地确定性引擎，判决由引擎产出）",
   "description_zh": "AI 内容安检：本地检测提示注入、隐形字符、编码载荷和 AI 配置文件后门",
-  "version": "1.1.0",
-  "updateNotes": "v1.1.0：严格测试修复版——新增中文与判决劫持覆盖层检测（zh_rules）；路由改全量基础检测+按路径追加（修复文档/配置漏检）；--file 模式补系统目录与敏感文件防护；SARIF/报告/--decode 全面脱敏（密钥掩码/原文不落盘）；emoji ZWJ 误报降级；UTF-16 BOM 支持；报告不覆盖已有文件；clean 置信降为 0.6 并去除\"安检通过\"话术。检测特征字符串为只读匹配规则（见 references/security-notes.md）。",
+  "version": "1.2.0",
+  "updateNotes": "v1.2.0：复测修复版——零原文口径（证据仅 len+SHA8+前后4字符 teaser，description/SARIF 叙述字段洗洗，解码片段不再输出）；覆盖层编码检测接入引擎关键词表并按实际层数分级（1层→E-07 medium，≥2层→E-57 critical）；劫持/外传/工具滥用正则收紧（办公语料误报清零）；--min-severity 不再影响判决与退出码；dist/build/node_modules 纳入扫描；emoji 家族序列降为 info；非法输出路径返回结构化错误；禁写 __pycache__。",
   "ignore": []
 }

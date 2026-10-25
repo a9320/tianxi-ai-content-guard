@@ -32,6 +32,8 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # 安装副本不留 __pycache__（P2-9）
+
 # ── 编码三件套（第 1 件）：天禧自带 Python 3.14 的控制台默认 GBK，先改 UTF-8 ──
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -49,7 +51,7 @@ from engine.sarif import build_sarif  # noqa: E402
 from engine.scan import scan_file, scan_repo  # noqa: E402
 
 SKILL_NAME = "ai-content-guard"
-SKILL_VERSION = "1.1.0"
+SKILL_VERSION = "1.2.0"
 SCHEMA_VERSION = "1.0"
 
 # ── 扫描防护上限（对齐 docs/design-decisions.md 八条）──
@@ -76,9 +78,12 @@ _SENSITIVE_PATTERNS = [
     "NTDS.dit", "SAM", "SECURITY", "*.kdbx", "*.pfx", "*.p12", "*.wallet",
 ]
 
+# 产品级跳过目录：比引擎管线口径更窄——dist/build/node_modules 属分发内容，
+# 对内容安检恰好是攻击者藏身处（复测 §3.4），必须扫；只跳 VCS 内部与缓存。
+SKILL_SKIP_DIRS = SKIP_DIRS - {"node_modules", "dist", "build"}
 # 贴入文本的多路由虚拟名：同一内容走"文档路径(N-06)"与"代码路径(4 检测器)"两趟；
-# 另抽 base64 候选串构造带引号的虚拟代码行——引擎 E-57 只认字符串字面量（防误报
-# 设计），裸文本中的编码载荷须经此适配才能进入剥离链。
+# 另抽 base64 候选串构造带引号的虚拟代码行——引擎编码检测只认字符串字面量
+# （防误报设计），裸文本中的编码载荷须经此适配才能进入剥离链。
 _TEXT_VIRTUAL_NAMES = ["pasted-content.md", "pasted-content.py"]
 _B64_RUN_RE = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
 _MAX_PAYLOAD_CANDIDATES = 64
@@ -216,13 +221,13 @@ def collect_dir(root: Path, max_files: int, max_bytes: int,
         for entry in entries:
             if stopped:
                 return
-            if time.monotonic() > deadline:
+            if time.monotonic() >= deadline:  # >= ：Windows 计时器粒度下相同 tick 也要停
                 stopped = "timeout"
                 coverage["truncated"] = True
                 coverage["limits"].append(f"达到 {timeout_s}s 超时上限，未扫完")
                 return
             if entry.is_dir(follow_symlinks=False):
-                if entry.name in SKIP_DIRS:
+                if entry.name in SKILL_SKIP_DIRS:
                     coverage["dirs_skipped"] = coverage.get("dirs_skipped", 0) + 1
                     if len(coverage.get("dirs_skipped_names", [])) < 10:
                         coverage.setdefault("dirs_skipped_names", []).append(entry.name)
@@ -319,9 +324,31 @@ def redact_fragment(raw: str, limit: int = 40) -> str:
     return out[:limit]
 
 
+def _teaser(raw: str) -> str:
+    """零原文口径：片段只留前 4+后 4 字符（过密钥掩码与不可见记法之后），
+    拼接出的内容不足以复原任何可执行注入指令。"""
+    s = _mask_secrets(_notation_invisible(raw))
+    if len(s) <= 12:
+        return s[:2] + "…"
+    return s[:4] + "…" + s[-4:]
+
+
+def _scrub_description(desc: str, evidence: str) -> str:
+    """叙述字段零原文：把 description 中出现的证据原文（及其前 30 字符）替换掉。"""
+    if not evidence:
+        return desc
+    out = desc.replace(evidence, "[证据已脱敏]")
+    head = evidence[:30]
+    if len(head) >= 12 and head in out:
+        out = out.replace(head, "[证据已脱敏]")
+    return out
+
+
 def redact_finding(f: dict) -> dict:
-    """输出前逐条脱敏：证据/解码载荷只保留 记法+长度+SHA8+短片段（密钥先掩码）。"""
-    evidence = _mask_secrets((f.get("code_snippet") or "")[:240])
+    """输出前逐条脱敏（零原文口径）：证据只保留 记法+长度+SHA8+前后4字符 teaser；
+    解码载荷只留 长度+SHA8；description 叙述字段洗掉证据原文。"""
+    raw_ev = (f.get("code_snippet") or "")[:240]
+    evidence = _mask_secrets(raw_ev)
     pitax = f.get("pitax") if isinstance(f.get("pitax"), dict) else {}
     decoded = pitax.get("decoded_payload")
     red = {
@@ -334,14 +361,14 @@ def redact_finding(f: dict) -> dict:
         "line": f.get("line"),
         "evidence_redacted": "[{code}] len={len} sha={sha} frag={frag}".format(
             code=f.get("type"), len=len(evidence), sha=_sha8(evidence),
-            frag=redact_fragment(evidence)),
-        "description": f.get("description"),
+            frag=_teaser(raw_ev)),
+        "description": _scrub_description(str(f.get("description") or ""), raw_ev),
         "advice": f.get("suggestion"),
     }
     if decoded:
         dec = _mask_secrets(str(decoded))
-        red["decoded_redacted"] = "[decoded] len={len} sha={sha} frag={frag}".format(
-            len=len(dec), sha=_sha8(dec), frag=redact_fragment(dec))
+        red["decoded_redacted"] = "[decoded] len={len} sha={sha}".format(
+            len=len(dec), sha=_sha8(dec))
     return red
 
 
@@ -376,7 +403,7 @@ def aggregate(findings: list[dict], coverage: dict, errors: list[str]) -> dict:
             str(f.get("severity", "info")).lower(), 0) + 1
     if counts["critical"] or counts["high"]:
         verdict, confidence = "malicious", 0.9
-    elif counts["medium"] or counts["low"] or counts["info"]:
+    elif counts["medium"]:
         verdict, confidence = "suspicious", 0.7
     elif errors or coverage.get("truncated"):
         verdict, confidence = "inconclusive", 0.3
@@ -479,23 +506,54 @@ def build_envelope(findings: list[dict], agg: dict, coverage: dict,
     return env
 
 
+def _sanitize_for_sarif(findings: list[dict]) -> list[dict]:
+    """SARIF 源头洗洗：description 内嵌的证据原文、pitax.evidence/decoded_payload
+    在进入 build_sarif 之前替换/移除——SARIF 的 message/fullDescription/properties
+    均由这些字段派生，源头干净则产物干净（零原文口径）。"""
+    out = []
+    for f in findings:
+        g = dict(f)
+        raw_ev = (f.get("code_snippet") or "")[:240]
+        g["description"] = _scrub_description(str(f.get("description") or ""), raw_ev)
+        pit = f.get("pitax")
+        if isinstance(pit, dict):
+            p2 = dict(pit)
+            if p2.get("evidence"):
+                p2["evidence"] = "[已脱敏]"
+            p2.pop("decoded_payload", None)
+            g["pitax"] = p2
+        out.append(g)
+    return out
+
+
 def _redact_sarif(doc: dict) -> dict:
-    """SARIF 输出脱敏（P0-4，wrapper 层后处理，不改锚内 sarif.py）：
-    message 不拼原始解码文本；properties 里的 evidence/decoded_payload 换脱敏形态；
-    informationUri 指向本仓。"""
+    """SARIF 输出脱敏（零原文口径，wrapper 层后处理，不改锚内 sarif.py）：
+    fullDescription/message/properties.evidence 中的证据原文一律替换；
+    informationUri 指向本仓；decoded_payload 只留长度+哈希。"""
     doc.setdefault("runs", [])
     for run in doc["runs"]:
-        tool = run.get("tool", {}).get("driver", {})
-        if "coderisk" in str(tool.get("informationUri", "")).lower():
-            tool["informationUri"] = "https://github.com/a9320/tianxi-ai-content-guard"
+        driver = run.get("tool", {}).get("driver", {})
+        if "coderisk" in str(driver.get("informationUri", "")).lower():
+            driver["informationUri"] = "https://github.com/a9320/tianxi-ai-content-guard"
+        for rd in driver.get("rules", []):
+            fd = rd.get("fullDescription", {}).get("text", "")
+            if len(fd) > 20:  # 规则卡为静态文本，仅当内嵌证据时洗洗
+                rd["fullDescription"]["text"] = fd[:120] + ("…" if len(fd) > 120 else "")
         for r in run.get("results", []):
-            msg = str(r.get("message", {}).get("text", ""))
-            if " | decoded payload:" in msg:
-                r["message"]["text"] = msg.split(" | decoded payload:")[0] + \
-                    " | decoded payload: [已脱敏]"
             props = (r.get("properties") or {}).get("pitax") or {}
-            if props.get("evidence"):
-                props["evidence"] = redact_fragment(str(props["evidence"]))
+            ev = str(props.get("evidence") or "")
+            scrub = "[证据已脱敏]" if ev else None
+            for holder in (r.get("message", {}),
+                           (r.get("properties") or {}).get("rule", {}) or {}):
+                txt = str(holder.get("text", ""))
+                if ev and (ev in txt or ev[:30] in txt):
+                    txt = txt.replace(ev, scrub).replace(ev[:30], scrub)
+                if " | decoded payload:" in txt:
+                    txt = txt.split(" | decoded payload:")[0] + " | decoded payload: [已脱敏]"
+                holder["text"] = txt
+            if ev:
+                props["evidence"] = "[len={len} sha={sha} frag={frag}]".format(
+                    len=len(ev), sha=_sha8(ev), frag=_teaser(ev))
             if props.get("decoded_payload"):
                 dec = _mask_secrets(str(props["decoded_payload"]))
                 props["decoded_payload"] = f"[redacted] len={len(dec)} sha={_sha8(dec)}"
@@ -678,24 +736,33 @@ def main(argv: list[str] | None = None) -> int:
     except (PermissionError, OSError) as exc:
         return _err("RUNTIME_ERROR", "path", f"{type(exc).__name__}: {exc}")
 
+    agg = aggregate(findings, coverage, errors)  # 判决一律基于全量命中（修 R2-5）
+    display = findings
     if args.min_severity:
         floor = _SEVERITY_RANK[args.min_severity]
-        findings = [f for f in findings if _SEVERITY_RANK.get(
+        display = [f for f in findings if _SEVERITY_RANK.get(
             str(f.get("severity", "info")).lower(), 4) <= floor]
-
-    agg = aggregate(findings, coverage, errors)
     report_paths = None
-    if findings and (len(findings) > 10 or args.out):
-        report_paths = write_reports(findings, agg, coverage,
-                                     Path(args.out) if args.out else None)
-    envelope = build_envelope(findings, agg, coverage, report_paths,
+    try:
+        if findings and (len(findings) > 10 or args.out):
+            report_paths = write_reports(findings, agg, coverage,
+                                         Path(args.out) if args.out else None)
+    except OSError as exc:
+        return _err("INVALID_ARGUMENT", "out", f"报告路径不可写：{exc}")
+    envelope = build_envelope(display, agg, coverage, report_paths,
                               int((time.monotonic() - started) * 1000))
+    if args.min_severity and len(display) < len(findings):
+        envelope["display_filtered_out"] = len(findings) - len(display)
     if args.sarif:
-        sarif_path = _unique_path(Path(args.sarif))
-        sarif_path.parent.mkdir(parents=True, exist_ok=True)
-        sarif_path.write_text(
-            json.dumps(_redact_sarif(build_sarif(findings, SKILL_NAME, SKILL_VERSION)),
-                       ensure_ascii=False, indent=2), encoding="utf-8")
+        try:
+            sarif_path = _unique_path(Path(args.sarif))
+            sarif_path.parent.mkdir(parents=True, exist_ok=True)
+            sarif_path.write_text(
+                json.dumps(_redact_sarif(build_sarif(_sanitize_for_sarif(findings),
+                                                      SKILL_NAME, SKILL_VERSION)),
+                           ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as exc:
+            return _err("INVALID_ARGUMENT", "sarif", f"SARIF 路径不可写：{exc}")
         envelope["sarif_path"] = str(sarif_path)
 
     if args.format == "markdown":
@@ -713,7 +780,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.fail_on and any(_SEVERITY_RANK.get(
             str(f.get("severity", "info")).lower(), 4) <= _SEVERITY_RANK[args.fail_on]
-            for f in findings):
+            for f in findings):  # 全量判定，--min-severity 不可绕过（修 R2-5）
         return 1
     return 0
 
