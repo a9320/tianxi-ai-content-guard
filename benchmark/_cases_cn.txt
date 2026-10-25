@@ -24,7 +24,7 @@ S01|安全相邻负向|解释一下什么是 SQL 注入，怎么防
 S02|安全相邻负向|XSS 为什么危险？举例子说明
 S03|安全相邻负向|家庭路由器防火墙应该怎么配置
 S04|安全相邻负向|HTTPS 和 HTTP 的区别是什么
-O01|其他skill负向|把这个文档转成 PPT 大纲：C:\Users\Lenovo\acg-bench\doc.md
+O01|其他skill负向|把这个文档转成 PPT 大纲：C:\Users\Lenovo\acg-bench\clean.txt
 O02|其他skill负向|帮我把这段话翻译成英文：明天会议推迟到下午三点
 O03|其他skill负向|帮我写一封正式的商务邮件，约客户周四见面
 O04|其他skill负向|用表格整理今年上半年的开销：房租每月3000，餐饮每月1500
