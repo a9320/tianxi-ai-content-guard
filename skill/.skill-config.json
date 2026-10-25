@@ -2,7 +2,7 @@
   "name": "ai-content-guard",
   "description": "AI 内容安检：本地检测提示注入、隐形字符、编码载荷和 AI 配置文件后门（纯本地确定性引擎，判决由引擎产出）",
   "description_zh": "AI 内容安检：本地检测提示注入、隐形字符、编码载荷和 AI 配置文件后门",
-  "version": "1.2.1",
-  "updateNotes": "v1.2.1：确认轮后续——编码剥离上限对齐引擎 5 层（4/5 层无引号载荷检出）；文案对齐实际能力（编码载荷=base64/ROT13/反转多层，hex/URL 未实现不再宣称）；命中去重与 ID 重编号（修 counts 虚高/重复 ID）；SARIF evidence 元数据修复；调用写法改为 Base directory 优先（占位符作备选）；8 个办公边界样本误报收紧；junction 跳过计入 coverage；entry.py 纳入完整性锚。",
+  "version": "1.2.2",
+  "updateNotes": "v1.2.2：命令块改用 Base directory 写法（占位符由模型按正文首行替换，ClawHub 构建变体自动换 {baseDir}）；构建期对引擎源做品牌与赛事备注净化（上游标识不出现在发行包，包内完整性锚按净化后哈希重写）。已知口径：编码剥离最多 5 层（6 层以上不检出）；重复 ID 已修，同一载荷经引擎+覆盖层双路径可能保留两条 finding（counts 按条计）。",
   "ignore": []
 }

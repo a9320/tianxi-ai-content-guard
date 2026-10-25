@@ -2,7 +2,7 @@
 name: ai-content-guard
 description: "AI 内容安检：检测文本、文件、网页和邮件中的提示注入（prompt injection）、隐形字符走私（zero-width/控制符）、编码载荷（base64/ROT13/反转多层）和 AI 配置文件后门（.cursor/rules、CLAUDE.md、MCP 配置）。纯本地确定性引擎，零网络零第三方依赖，输出四值判决、脱敏证据与处置建议。"
 when-to-use: "当用户要求安全检查、内容安检、提示注入检测、隐形字符排查、编码载荷分析、AI 配置审计，或在总结/执行来自网页、邮件、聊天、文档、外部仓库的内容之前"
-version: 1.2.1
+version: 1.2.2
 ---
 
 # AI 内容安检（ai-content-guard）
@@ -32,33 +32,32 @@ version: 1.2.1
 
 ## 2. 怎么运行
 
-**确定脚本路径**：宿主会在本 skill 正文开头注入一行
-`Base directory for this skill: <目录>`——用该目录拼接 `scripts/entry.py` 最可靠；
-若宿主支持 `${QODER_SKILL_DIR}` 占位符（qoder 运行时实证支持），下述命令可直接用。
+**确定脚本路径（先做这步）**：宿主在本 skill 正文开头注入了一行
+`Base directory for this skill: <目录>`。下文命令中的 `<skill 目录>` 一律替换为
+该行给出的实际路径（复制命令前先替换，不要原样粘贴占位符）。
 
 ```bash
 # 贴入短文本（<8KB）
-python "${QODER_SKILL_DIR}/scripts/entry.py" --text "<用户粘贴的内容>"
+python "<skill 目录>/scripts/entry.py" --text "<用户粘贴的内容>"
 
 # 单个文件
-python "${QODER_SKILL_DIR}/scripts/entry.py" --file "<文件路径>"
+python "<skill 目录>/scripts/entry.py" --file "<文件路径>"
 
 # 目录 / 仓库（递归只读，自带上限与防护）
-python "${QODER_SKILL_DIR}/scripts/entry.py" --dir "<目录路径>"
+python "<skill 目录>/scripts/entry.py" --dir "<目录路径>"
 
 # AI 配置专项审计（只扫 .cursor/rules、CLAUDE.md、AGENTS.md、copilot-instructions 等）
-python "${QODER_SKILL_DIR}/scripts/entry.py" --dir "<仓库路径>" --mode config
+python "<skill 目录>/scripts/entry.py" --dir "<仓库路径>" --mode config
 
 # 长文本：写入临时文件走 --file，或管道走 stdin（勿放命令行参数）
-python "${QODER_SKILL_DIR}/scripts/entry.py" --file - < 长文本.txt
+python "<skill 目录>/scripts/entry.py" --file - < 长文本.txt
 
 # 编码载荷复核 / 边界自证
-python "${QODER_SKILL_DIR}/scripts/entry.py" --decode "<base64 载荷>"
-python "${QODER_SKILL_DIR}/scripts/entry.py" --self-check
+python "<skill 目录>/scripts/entry.py" --decode "<base64 载荷>"
+python "<skill 目录>/scripts/entry.py" --self-check
 ```
 
 Python 用 `python`（Windows 下 `python3` 可能是商店占位符）；不可用时 Windows 用 `py -3`。
-若 `${QODER_SKILL_DIR}` 在当前环境未被替换，用本 skill 的 Base directory（宿主会在正文前给出）拼接 `scripts/entry.py`。
 **URL 场景**：本 skill 零网络，你自己无法也不应联网——先用你已有的网页读取能力获取
 正文文本，再把正文当 `--text` 传入。
 

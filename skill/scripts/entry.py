@@ -52,7 +52,7 @@ from engine.sarif import build_sarif  # noqa: E402
 from engine.scan import scan_file, scan_repo  # noqa: E402
 
 SKILL_NAME = "ai-content-guard"
-SKILL_VERSION = "1.2.1"
+SKILL_VERSION = "1.2.2"
 SCHEMA_VERSION = "1.0"
 
 # ── 扫描防护上限（对齐 docs/design-decisions.md 八条）──
@@ -563,8 +563,9 @@ def _redact_sarif(doc: dict) -> dict:
     doc.setdefault("runs", [])
     for run in doc["runs"]:
         driver = run.get("tool", {}).get("driver", {})
-        if "coderisk" in str(driver.get("informationUri", "")).lower():
-            driver["informationUri"] = "https://github.com/a9320/tianxi-ai-content-guard"
+        _repo_uri = "https://github.com/a9320/tianxi-ai-content-guard"
+        if driver.get("informationUri") and driver.get("informationUri") != _repo_uri:
+            driver["informationUri"] = _repo_uri
         for rd in driver.get("rules", []):
             fd = rd.get("fullDescription", {}).get("text", "")
             if len(fd) > 400:  # 超长描述截断（正常规则卡不会这么长）
