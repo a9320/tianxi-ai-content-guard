@@ -1,0 +1,8 @@
+{
+  "name": "ai-content-guard",
+  "description": "Local, deterministic detector for prompt injection, invisible-character smuggling, encoded payloads, and AI config backdoors. Engine verdicts, model explains.",
+  "description_zh": "AI 内容安检：本地检测提示注入、隐形字符、编码载荷和 AI 配置文件后门",
+  "version": "1.0.0",
+  "updateNotes": "首次提交：纯本地只读检测，零网络零第三方依赖；判决由确定性引擎产出，模型仅做解释；证据输出已脱敏；含 --self-check 边界自证。检测特征字符串为只读匹配规则，位于引擎规则表，见 references/security-notes.md。",
+  "ignore": []
+}
