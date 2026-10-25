@@ -515,6 +515,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.decode is not None:
         return decode_review(args.decode)
 
+    # session JSONL 遥测锚：每次执行在 stderr 留稳定标记，供触发率统计
+    print(f"[{SKILL_NAME}] v{SKILL_VERSION} engine=pitax-{PITAX_VERSION}",
+          file=sys.stderr)
+
     inputs = [x for x in (args.text, args.file, args.dir_path) if x]
     if len(inputs) != 1:
         return _err("INVALID_ARGUMENT", "text|file|dir",
