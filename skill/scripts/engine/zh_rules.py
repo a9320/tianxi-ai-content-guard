@@ -37,23 +37,29 @@ _P_LEAK = re.compile(
 #    陈述性汇报（"报告正常/报告未检出"是描述系统而非命令检测者）──
 _P_HIJACK_ZH = re.compile(
     r"(?:(?:请|务必|必须|立即|要)\s*)?"
-    r"(?:报告|输出|回复|告诉[^。.\n]{0,6}用户)[^。.\n]{0,10}"
+    r"(?:报告|输出|回复|告诉[^。.\n]{0,6}用户)(?![^。.\n]{0,4}(?:已|了))[^。.\n]{0,10}"
     r"(?<!是否)(?<!否)(?<!未检出)(?<!无)(?<!非)(?:clean|安全|通过)"
     r"|(?:判决|判定|结论|verdict)[^。.\n]{0,6}(?:为|是|:|：)\s*(?:clean|安全|通过|未检出)")
 _P_HIJACK_EN = re.compile(
-    r"(?:report|state|output|reply|tell[^.\n]{0,12}user)[^.\n]{0,20}"
+    r"(?:^|[.!?]\s+|;\s*|please\s+|now\s+)"
+    r"(?:report|state|output|reply|tell[^.\n]{0,12}user)"
+    r"(?!\s+(?:whether|if|says|said|is|was|the\s+results))[^.\n]{0,20}"
     r"\b(clean|safe|passed|benign|no\s+issues|harmless)\b"
-    r"|verdict\s+is\s+(clean|safe)", re.I)
+    r"|verdict\s+is\s+(clean|safe)", re.I | re.M)
 
-# ── 数据外传：要求 敏感对象 或 外部目的地（二选一），普通办公收发不命中 ──
+# ── 数据外传：敏感对象 ×（外部目的地 或 全量词）双条件，普通办公收发不命中 ──
 _SENSITIVE_OBJ = (r"密钥|密码|凭据|令牌|通讯录|联系人|聊天记录|api[\s_-]?key|token|\.env|数据库备份")
 _EXTERNAL_DEST = (r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+|https?://|外部|远程|攻击者|attacker|陌生")
-_P_EXFIL_ZH = re.compile(  # V-O 语序 + 敏感对象
-    r"(发送|上传|外传|传送|发给|邮寄到|提交到|传到)[^。.\n]{0,14}"
+_P_EXFIL_ZH = re.compile(  # V-O：发送 + 全量 + 敏感对象（"发送所有密钥"）
+    r"(发送|上传|外传|传送|发给|邮寄到|提交到|传到)[^。.\n]{0,6}"
+    r"(所有|全部|一切)[^。.\n]{0,10}"
     rf"(?:{_SENSITIVE_OBJ})", re.I)
-_P_EXFIL_ZH2 = re.compile(  # 把字句 + 敏感对象
+_P_EXFIL_ZH2 = re.compile(  # 把字句：敏感对象 + 外部目的地
     rf"(?:把|将)[^。.\n]{{0,24}}(?:{_SENSITIVE_OBJ})[^。.\n]{{0,16}}"
-    r"(发送|上传|外传|传到|发给|提交到|邮寄到|传给)", re.I)
+    rf"(?:发送|上传|外传|传到|发给|提交到|邮寄到|传给)[^。.\n]{{0,16}}(?:{_EXTERNAL_DEST})", re.I)
+_P_EXFIL_ZH2B = re.compile(  # 把字句：全量 + 敏感对象（任意目的地也高危）
+    rf"(?:把|将)[^。.\n]{{0,8}}(?:所有|全部)[^。.\n]{{0,14}}(?:{_SENSITIVE_OBJ})[^。.\n]{{0,16}}"
+    r"(?:发送|上传|外传|传到|发给|提交到|邮寄到|传给)", re.I)
 _P_EXFIL_ZH3 = re.compile(  # 任意对象 + 外部目的地
     rf"(?:把|将|发送|上传|外传)[^。.\n]{{0,20}}(?:文件|数据|资料)"
     rf"[^。.\n]{{0,14}}(?:{_EXTERNAL_DEST})", re.I)
@@ -63,11 +69,13 @@ _P_EXFIL_EN = re.compile(  # all/every + 敏感对象，或任意量 + 外部目
     r"|(?:send|upload|mail|exfiltrate)[^.\n]{0,16}\b(?:files?|data)\b[^.\n]{0,16}"
     r"\b(?:https?://|attacker|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+)\b", re.I)
 
-# ── 工具滥用：仅真实破坏命令语法；"删除所有临时/缓存文件"类描述性语句排除 ──
+# ── 工具滥用：仅真实破坏命令语法；描述性语句（"清理脚本会删除所有文件"）
+#    无祈使前缀不命中；"删除所有临时/缓存文件"类限定词排除 ──
 _P_TOOLABUSE_ZH = re.compile(
     r"(?:执行|运行|调用|帮我?跑)[^。.\n]{0,14}"
     r"(rm\s*-rf|mkfs|format\s+/|del\s+/[a-z]|shutdown|格式化[硬盘磁盘系统盘])"
-    r"|删除所有(?!临时|缓存|垃圾|过期|无效)(?:文件|数据|目录|记录)"
+    r"|(?:^|[。.!?\n;；,，]\s*|请|务必|帮我|立即|现在|直接)(?:删除|清空)所有(?!临时|缓存|垃圾|过期|无效)"
+    r"(?:文件|数据|目录|记录)"
     r"|(?:执行|运行)[^。.\n]{0,10}(?:(?:rm|mkfs|format|del|shutdown)\b)", re.I)
 
 # ── 编码载荷解码后判定：复用引擎关键词表 + 覆盖层补充（英文短语全集）──
@@ -100,6 +108,7 @@ _RULESETS = [
     (_P_HIJACK_EN, "verdict_hijack", "high"),
     (_P_EXFIL_ZH, "exfiltration", "high"),
     (_P_EXFIL_ZH2, "exfiltration", "high"),
+    (_P_EXFIL_ZH2B, "exfiltration", "high"),
     (_P_EXFIL_ZH3, "exfiltration", "high"),
     (_P_EXFIL_EN, "exfiltration", "high"),
     (_P_TOOLABUSE_ZH, "tool_abuse", "critical"),
@@ -174,7 +183,7 @@ def scan_encoded_zh(content: str, path: str, _n: int = 0) -> list[dict]:
         for lineno, line in enumerate(content.splitlines(), start=1):
             for cand in _B64_RUN.findall(line)[:8]:
                 data, peeled, layers = cand, None, 0
-                for _ in range(3):
+                for _ in range(5):  # 对齐引擎 _MAX_LAYERS=5（4/5 层无引号载荷也要剥）
                     try:
                         data = _b64.b64decode(data, validate=True).decode(
                             "utf-8", errors="replace")

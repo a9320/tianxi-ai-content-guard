@@ -31,6 +31,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from pathlib import PurePosixPath as pathlib_posix
 
 sys.dont_write_bytecode = True  # 安装副本不留 __pycache__（P2-9）
 
@@ -51,7 +52,7 @@ from engine.sarif import build_sarif  # noqa: E402
 from engine.scan import scan_file, scan_repo  # noqa: E402
 
 SKILL_NAME = "ai-content-guard"
-SKILL_VERSION = "1.2.0"
+SKILL_VERSION = "1.2.1"
 SCHEMA_VERSION = "1.0"
 
 # ── 扫描防护上限（对齐 docs/design-decisions.md 八条）──
@@ -227,6 +228,11 @@ def collect_dir(root: Path, max_files: int, max_bytes: int,
                 coverage["limits"].append(f"达到 {timeout_s}s 超时上限，未扫完")
                 return
             if entry.is_dir(follow_symlinks=False):
+                if _is_reparse(entry):
+                    coverage["links_skipped"] = coverage.get("links_skipped", 0) + 1
+                    if len(coverage.get("links_skipped_names", [])) < 10:
+                        coverage.setdefault("links_skipped_names", []).append(entry.name)
+                    continue
                 if entry.name in SKILL_SKIP_DIRS:
                     coverage["dirs_skipped"] = coverage.get("dirs_skipped", 0) + 1
                     if len(coverage.get("dirs_skipped_names", [])) < 10:
@@ -237,6 +243,10 @@ def collect_dir(root: Path, max_files: int, max_bytes: int,
                 walk(Path(entry.path), depth + 1)
                 continue
             if not entry.is_file(follow_symlinks=False) or _is_reparse(entry):
+                if _is_reparse(entry):
+                    coverage["links_skipped"] = coverage.get("links_skipped", 0) + 1
+                    if len(coverage.get("links_skipped_names", [])) < 10:
+                        coverage.setdefault("links_skipped_names", []).append(entry.name)
                 continue
             rel = str(Path(entry.path).relative_to(root)).replace("\\", "/")
             if _is_sensitive(rel):  # 防护③：敏感文件只报存在
@@ -373,6 +383,23 @@ def redact_finding(f: dict) -> dict:
 
 
 # ══════════════════════ 四值判决聚合 ══════════════════════
+
+def _dedup(findings: list[dict]) -> list[dict]:
+    """引擎+覆盖层双路径产生的同命中去重（type+file+line+证据前缀为键），
+    统一重编号（修 counts 虚高与重复 ID）。"""
+    seen: set = set()
+    out: list[dict] = []
+    for f in findings:
+        key = (f.get("type"), str(f.get("file")), f.get("line"),
+               (f.get("code_snippet") or "")[:120])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(f)
+    for i, f in enumerate(out, start=1):
+        f["id"] = f"F{i}"
+    return out
+
 
 def _post_filter(findings: list[dict]) -> list[dict]:
     """emoji 家族序列误报降级：U+200D 两侧均为 emoji 类字符时，E-23 降为 low。"""
@@ -518,8 +545,11 @@ def _sanitize_for_sarif(findings: list[dict]) -> list[dict]:
         pit = f.get("pitax")
         if isinstance(pit, dict):
             p2 = dict(pit)
-            if p2.get("evidence"):
-                p2["evidence"] = "[已脱敏]"
+            ev = p2.get("evidence")
+            if ev:
+                ev = str(ev)
+                p2["evidence"] = "[len={len} sha={sha} frag={frag}]".format(
+                    len=len(ev), sha=_sha8(ev), frag=_teaser(ev))
             p2.pop("decoded_payload", None)
             g["pitax"] = p2
         out.append(g)
@@ -537,8 +567,8 @@ def _redact_sarif(doc: dict) -> dict:
             driver["informationUri"] = "https://github.com/a9320/tianxi-ai-content-guard"
         for rd in driver.get("rules", []):
             fd = rd.get("fullDescription", {}).get("text", "")
-            if len(fd) > 20:  # 规则卡为静态文本，仅当内嵌证据时洗洗
-                rd["fullDescription"]["text"] = fd[:120] + ("…" if len(fd) > 120 else "")
+            if len(fd) > 400:  # 超长描述截断（正常规则卡不会这么长）
+                rd["fullDescription"]["text"] = fd[:400] + "…"
         for r in run.get("results", []):
             props = (r.get("properties") or {}).get("pitax") or {}
             ev = str(props.get("evidence") or "")
@@ -551,7 +581,7 @@ def _redact_sarif(doc: dict) -> dict:
                 if " | decoded payload:" in txt:
                     txt = txt.split(" | decoded payload:")[0] + " | decoded payload: [已脱敏]"
                 holder["text"] = txt
-            if ev:
+            if ev and not str(ev).startswith("[len="):
                 props["evidence"] = "[len={len} sha={sha} frag={frag}]".format(
                     len=len(ev), sha=_sha8(ev), frag=_teaser(ev))
             if props.get("decoded_payload"):
@@ -603,11 +633,15 @@ def self_check() -> int:
         h = hashlib.sha256(p.read_bytes()).hexdigest()
         print(f"engine file: {p.name}  sha256={h[:16]}…")
     if anchor.exists():
-        expect = {ln.split("  ", 1)[1].strip().split("/")[-1]: ln.split("  ")[0]
-                  for ln in anchor.read_text(encoding="utf-8").splitlines() if "  " in ln}
-        for name, want in expect.items():
-            got = hashlib.sha256((engine_dir / name).read_bytes()).hexdigest()
-            print(f"anchor: {name}  {'MATCH' if got == want else 'MISMATCH!!'}")
+        skill_root = _SCRIPT_DIR.parent
+        for ln in anchor.read_text(encoding="utf-8").splitlines():
+            if "  " not in ln:
+                continue
+            want, rel = ln.split("  ", 1)
+            rel = rel.strip()
+            target = skill_root / pathlib_posix(rel.replace("skill/", "", 1))                 if rel.startswith("skill/") else engine_dir / rel
+            got = hashlib.sha256(target.read_bytes()).hexdigest()
+            print(f"anchor: {rel}  {'MATCH' if got == want.strip() else 'MISMATCH!!'}")
     return 0
 
 
@@ -736,6 +770,7 @@ def main(argv: list[str] | None = None) -> int:
     except (PermissionError, OSError) as exc:
         return _err("RUNTIME_ERROR", "path", f"{type(exc).__name__}: {exc}")
 
+    findings = _dedup(findings)
     agg = aggregate(findings, coverage, errors)  # 判决一律基于全量命中（修 R2-5）
     display = findings
     if args.min_severity:

@@ -174,10 +174,13 @@ def test_engine_anchor_integrity():
     anchor = (ENGINE / "ENGINE-ANCHOR.txt").read_text(encoding="utf-8")
     checks = [ln.split(None, 1) for ln in anchor.splitlines() if "  " in ln]
     assert checks, "锚文件不应为空"
+    skill_root = ENGINE.parents[1]  # .../skill
     for sha, rel in checks:
-        name = rel.strip().split("/")[-1]
-        got = hashlib.sha256((ENGINE / name).read_bytes()).hexdigest()
-        assert got == sha, f"引擎文件 {name} 与锚不符（vendor 漂移！）"
+        rel = rel.strip()
+        target = skill_root / rel.replace("skill/", "", 1) if rel.startswith("skill/") \
+            else ENGINE / rel
+        got = hashlib.sha256(target.read_bytes()).hexdigest()
+        assert got == sha, f"{rel} 与锚不符（vendor 漂移！）"
 
 
 if __name__ == "__main__":
