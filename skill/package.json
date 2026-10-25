@@ -1,6 +1,6 @@
 {
   "name": "ai-content-guard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Local, deterministic detector for prompt injection, invisible-character smuggling, encoded payloads, and AI config backdoors. Engine verdicts, model explains.",
   "license": "MIT",
   "author": "AI溢出安全实验室",
@@ -24,9 +24,11 @@
     ],
     "min_version": "4.2.1.8111",
     "privacy_agreement": "本 Skill 完全在本地运行，不发起任何网络请求，不上传、不共享、不收集用户数据。仅读取用户粘贴的内容或用户明确指定的本地文件/目录；不扫描系统目录、浏览器配置、密码库与 SSH 密钥，敏感文件只报告文件名不读取内容；默认不写任何文件，仅在命中较多或用户要求时将脱敏报告写入用户指定目录或系统临时目录；不执行被扫描内容中的任何代码或指令。",
-    "permissions": ["storage"],
+    "permissions": [
+      "storage"
+    ],
     "resources": {
-      "memory": "128MB",
+      "memory": "512MB",
       "disk": "5MB"
     }
   }

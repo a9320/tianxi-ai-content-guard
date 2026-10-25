@@ -26,6 +26,7 @@ SKILL = REPO / "skill"
 
 ALLOWED_EXT = {".md", ".py", ".sh", ".js", ".ts", ".json", ".yaml", ".yml",
                ".toml", ".txt", ".mjs", ".cjs"}
+ALLOWED_BARE_NAMES = {"LICENSE", "NOTICE", "AUTHORS"}  # 无扩展名的许可/署名文件
 FORBIDDEN_NAMES = {".DS_Store"}
 FORBIDDEN_PARTS = {".git", "node_modules", "__pycache__", "dist"}
 FORBIDDEN_SUFFIX = {".log", ".env", ".zip", ".png", ".jpg", ".bak", ".pyc"}
@@ -57,7 +58,7 @@ def collect_files():
             continue
         if rel.suffix.lower() in FORBIDDEN_SUFFIX or rel.name.startswith(".env"):
             continue
-        if rel.suffix.lower() not in ALLOWED_EXT:
+        if rel.suffix.lower() not in ALLOWED_EXT and rel.name not in ALLOWED_BARE_NAMES:
             raise SystemExit(f"[自检④] 扩展名不在白名单：{rel}（图标走网页控制台）")
         if p.stat().st_size > 1024 * 1024:
             raise SystemExit(f"[自检②] 单文件超 1MB（CLI 会静默跳过）：{rel}")

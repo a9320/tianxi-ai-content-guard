@@ -1,13 +1,15 @@
-"""PITAX 扫描路由层 — 复刻自 arcanum-spark codeark/tools/pitax_scan.py@168f660 的
-scan_file/scan_repo 分流逻辑，剥离 Strands 依赖（skill 包零第三方依赖铁律）。
+"""PITAX 扫描路由层 v2 — skill 产品路由（与上游管线刻意分叉，见 vendor/SYNC.md）。
 
-分流规则（与管线 agent0 同源，保证 12 命中锚可比）：
-  - is_ai_config_path(path)  → 只跑 PIT-T-46（AI 指令文件后门）
-  - is_doc_path(path)        → 只跑 PIT-N-06（文档投毒）
-  - 否则                     → 跑其余检测器（PIT-E-23/54/T-51 + 编码 PIT-E-07/14/36/57）
+v1 复刻上游 codeark/tools/pitax_scan.py@168f660 的互斥路由；2026-10-25 严格测试
+（P0-2）证明互斥路由漏检：.md/.txt 不跑隐形字符/编码检测、config 不跑隐形/编码。
+v2 改为**全量基础检测 + 按路径追加**，代价是 demo 锚从 12 变宽（skill 产品以覆盖
+优先，管线精度口径仍以上游为准）。
 
-本文件不属于 vendor 锚（ENGINE-SHA256.txt 只锚五个引擎原文件）；
-引擎源头改动分流逻辑时，此处需同步（SYNC.md 纪律）。
+路由（v2）：
+  全部文件：invisible / trojan / encoded（引擎）+ 中文与劫持覆盖层（zh_rules）
+  追加：AI 配置路径 → T-46；文档路径 → N-06；代码文件 → 注释注入 T-51
+
+本文件不属于 vendor 五文件锚；上游双语重构落地后，zh_rules 覆盖层合并回上游。
 """
 from __future__ import annotations
 
@@ -21,28 +23,57 @@ from .detectors import (
     is_ai_config_path,
     is_doc_path,
 )
+from .zh_rules import scan_encoded_zh, scan_zh
 
 __all__ = ["scan_file", "scan_repo"]
 
 
+def _emojiish(ch: str) -> bool:
+    o = ord(ch)
+    return (0x1F000 <= o <= 0x1FAFF or 0x2600 <= o <= 0x27BF or 0x2190 <= o <= 0x21FF
+            or 0x2B00 <= o <= 0x2BFF or ch == "️")
+
+
+def _emoji_zwj_guard(findings: list[dict], content: str) -> list[dict]:
+    """emoji 家族序列误报降级（P1-8）：E-23 命中行的全部 ZWJ 若都位于 emoji
+    字符之间（家庭/职业组合 emoji），降为 low。evidence 是记法化文本，
+    邻域判断必须回到原始行。"""
+    lines = content.splitlines()
+    for f in findings:
+        if f.get("type") != "PIT-E-23":
+            continue
+        ln = f.get("line")
+        line = lines[ln - 1] if isinstance(ln, int) and 0 < ln <= len(lines) else ""
+        zwjis = [i for i, c in enumerate(line) if c == "\u200d"]
+        if zwjis and all(0 < i < len(line) - 1
+                         and _emojiish(line[i - 1]) and _emojiish(line[i + 1])
+                         for i in zwjis):
+            f["severity"] = "low"
+            f["description"] = (str(f.get("description", "")) +
+                                "（ZWJ 位于 emoji 家族序列内部，已降级 low）").strip()
+    return findings
+
+
 def scan_file(path: str, content: str, _n: int = 0) -> list[dict]:
-    """对单个文件跑匹配的 PITAX 检测器，返回 report_dict 列表。永不抛异常。"""
-    findings: list = []
+    """单文件扫描：全量基础检测 + 按路径追加 + 中文/劫持覆盖层。永不抛异常。"""
+    raw: list = []
     try:
+        raw += detect_invisible_text(content, path)
+        raw += detect_trojan_source(content, path)
+        raw += detect_encoded_payloads(content, path)
         if is_ai_config_path(path):
-            findings = detect_ai_config_injection(content, path)
+            raw += detect_ai_config_injection(content, path)
         elif is_doc_path(path):
-            findings = detect_doc_injection(content, path)
+            raw += detect_doc_injection(content, path)
         else:
-            findings = [
-                *detect_invisible_text(content, path),
-                *detect_trojan_source(content, path),
-                *detect_comment_injection(content, path),
-                *detect_encoded_payloads(content, path),
-            ]
+            raw += detect_comment_injection(content, path)
     except Exception:
-        return []
-    return [f.to_report_dict(f"pitax-{_n}-{i}") for i, f in enumerate(findings, start=1)]
+        pass
+    findings = [f.to_report_dict(f"pitax-{_n}-{i}") for i, f in enumerate(raw, start=1)]
+    findings = _emoji_zwj_guard(findings, content)
+    findings += scan_zh(content, path, _n=_n)
+    findings += scan_encoded_zh(content, path, _n=_n)
+    return findings
 
 
 def scan_repo(files: dict[str, str]) -> list[dict]:

@@ -11,10 +11,10 @@
 ## 代码边界（可用 --self-check 现场验证）
 
 - 不执行被扫描内容中的任何代码、命令、URL；
-- 无动态执行（无 eval / exec / compile / os.system / subprocess / pickle.loads）；
+- 无 Python 动态执行（无 eval / exec / os.system / subprocess / pickle.loads；compile 仅指 re.compile 正则预编译）；
 - 无网络模块导入，不发起任何请求，不上传任何数据；
 - 默认不写文件（仅命中较多或用户 --out 时写脱敏报告）；
-- base64 解码仅用于"还原后匹配"（≤3 层 / 输入 ≤64KB / 输出 ≤256KB），
+- base64 解码仅用于"还原后匹配"（`--decode` 复核 ≤3 层；引擎剥离链最多 5 层；输入 ≤64KB / 输出 ≤256KB），
   解码结果只做字符串匹配与脱敏展示，不落盘不执行；
 - 引擎文件带 SHA-256 锚（scripts/engine/ENGINE-ANCHOR.txt），可核验完整性。
 

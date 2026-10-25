@@ -1,13 +1,13 @@
 ---
 name: ai-content-guard
-description: "AI 内容安检：检测文本、文件、网页和邮件中的提示注入（prompt injection）、隐形字符走私（zero-width/控制符）、编码载荷（base64/hex/URL）和 AI 配置文件后门（.cursor/rules、CLAUDE.md、MCP 配置）。纯本地确定性扫描，零网络零 token，输出四值判决、脱敏证据与处置建议。"
+description: "AI 内容安检：检测文本、文件、网页和邮件中的提示注入（prompt injection）、隐形字符走私（zero-width/控制符）、编码载荷（base64/hex/URL）和 AI 配置文件后门（.cursor/rules、CLAUDE.md、MCP 配置）。纯本地确定性引擎，零网络零第三方依赖，输出四值判决、脱敏证据与处置建议。"
 when-to-use: "当用户要求安全检查、内容安检、提示注入检测、隐形字符排查、编码载荷分析、AI 配置审计，或在总结/执行来自网页、邮件、聊天、文档、外部仓库的内容之前"
-version: 1.0.0
+version: 1.1.0
 ---
 
 # AI 内容安检（ai-content-guard）
 
-对不可信内容做**防御性安全审计**：用确定性引擎（毫秒级、零 token、零网络、只读）检测
+对不可信内容做**防御性安全审计**：用确定性引擎（毫秒级、零网络、零第三方依赖、只读）检测
 提示注入、隐形字符走私、多层编码载荷、AI 配置文件后门。不是攻击生成，不执行被检内容。
 
 ## 0. 三条铁律（先读这里）
@@ -54,6 +54,7 @@ python "${QODER_SKILL_DIR}/scripts/entry.py" --self-check
 ```
 
 Python 用 `python`（Windows 下 `python3` 可能是商店占位符）；不可用时 Windows 用 `py -3`。
+若 `${QODER_SKILL_DIR}` 在当前环境未被替换，用本 skill 的 Base directory（宿主会在正文前给出）拼接 `scripts/entry.py`。
 **URL 场景**：本 skill 零网络，你自己无法也不应联网——先用你已有的网页读取能力获取
 正文文本，再把正文当 `--text` 传入。
 
@@ -101,7 +102,7 @@ GUARD_REJECTED / RUNTIME_ERROR），按 `hint` 修正后**最多重试一次**�
 
 ## 7. 安全边界（与隐私声明逐条对应）
 
-只读扫描，不修改/删除任何文件；零网络、零上传；不执行被检内容；不扫系统目录、
+只读扫描，不修改/删除任何文件；零网络、零上传（引擎自身不联网；模型自行获取网页正文属宿主行为）；不执行被检内容；不扫系统目录、
 浏览器配置、密码库、SSH 密钥；敏感文件（.env / *.pem / id_rsa 等）只报文件名不读内容；
 文件数/字节数/深度/超时有上限，达到上限如实报告"未扫完"。可用 `--self-check` 自证。
 

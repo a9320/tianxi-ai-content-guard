@@ -49,7 +49,7 @@ from engine.sarif import build_sarif  # noqa: E402
 from engine.scan import scan_file, scan_repo  # noqa: E402
 
 SKILL_NAME = "ai-content-guard"
-SKILL_VERSION = "1.0.0"
+SKILL_VERSION = "1.1.0"
 SCHEMA_VERSION = "1.0"
 
 # ── 扫描防护上限（对齐 docs/design-decisions.md 八条）──
@@ -90,6 +90,19 @@ _DECODE_CHAIN = ("utf-8-sig", "utf-8", "gb18030", "utf-16")
 _INVISIBLE_RE = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u202a-\u202e\u00ad]")
 _LONG_TOKEN_RE = re.compile(r"[A-Za-z0-9+/=]{40,}")
 _B64_CANDIDATE_RE = re.compile(r"^[A-Za-z0-9+/]{16,}={0,2}$")
+# 密钥模式（P0-4）：短密钥不吃 40+ 长度线，必须单独脱敏
+_KEY_PATTERNS = re.compile(
+    r"(sk-[A-Za-z0-9_-]{6,}|AKIA[0-9A-Z]{12,}|ghp_[A-Za-z0-9]{10,}|gho_[A-Za-z0-9]{10,}"
+    r"|xox[baprs]-[A-Za-z0-9-]{6,}|Bearer\s+[A-Za-z0-9._-]{8,}"
+    r"|(?:api[_-]?key|apikey|secret|token|passwd|password)\s*[=:]\s*[\"\']?[A-Za-z0-9._-]{6,})",
+    re.I)
+
+
+def _mask_secrets(text: str) -> str:
+    def _m(m: re.Match) -> str:
+        s = m.group(0)
+        return s[:4] + "****" + s[-4:] if len(s) > 12 else s[:2] + "****"
+    return _KEY_PATTERNS.sub(_m, text)
 
 
 # ══════════════════════ 基础工具 ══════════════════════
@@ -146,14 +159,32 @@ def _is_reparse(entry) -> bool:
 # ══════════════════════ 输入采集 ══════════════════════
 
 def _read_file_bytes(path: Path) -> bytes:
-    """防护⑤/⑥：只读打开 + 二进制嗅探跳过 + 单文件上限。"""
+    """防护⑤/⑥：只读打开 + BOM 感知的二进制嗅探（UTF-16 不误判）+ 单文件上限。"""
     if path.stat().st_size > MAX_FILE_BYTES:
         raise ValueError(f"文件超过单文件上限（{MAX_FILE_BYTES // 1024}KB）：{path}")
     with open(path, "rb") as fh:  # noqa: SIM115 - 显式只读
-        head = fh.read(_BINARY_SNIFF_BYTES)
-        if b"\x00" in head:
-            raise ValueError(f"二进制文件，跳过：{path.name}")
-        return head + fh.read()
+        data = head = fh.read(_BINARY_SNIFF_BYTES)
+        if len(head) == _BINARY_SNIFF_BYTES:
+            data = head + fh.read()
+    # UTF-16/UTF-32 BOM 优先：其 NUL 字节是编码字节而非二进制标志
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff") or data[:4] in (b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"):
+        return data
+    if b"\x00" in data[:_BINARY_SNIFF_BYTES]:
+        raise ValueError(f"二进制文件，跳过：{path.name}")
+    return data
+
+
+def _guard_file(fpath: Path) -> None:
+    """file mode 防护（P0-3）：系统目录拒绝 + 敏感文件拒绝，与 dir mode 同口径。"""
+    resolved = fpath.resolve()
+    for d in _SYSTEM_DIRS:
+        try:
+            if _is_under(resolved, d.expanduser().resolve()):
+                raise ValueError(f"拒绝读取系统目录内文件：{resolved}")
+        except OSError:
+            continue
+    if _is_sensitive(fpath.name):
+        raise ValueError(f"敏感文件只报存在、不读取内容：{fpath.name}")
 
 
 def collect_dir(root: Path, max_files: int, max_bytes: int,
@@ -163,6 +194,7 @@ def collect_dir(root: Path, max_files: int, max_bytes: int,
     errors: list[str] = []
     coverage = {
         "root": str(root), "files_scanned": 0, "files_skipped": 0,
+        "dirs_skipped": 0, "dirs_skipped_names": [],
         "sensitive_skipped": [], "bytes_scanned": 0, "truncated": False,
         "limits": ["确定性层仅覆盖 PITAX 规则集；语义改写类攻击不在本层覆盖内"],
     }
@@ -171,7 +203,10 @@ def collect_dir(root: Path, max_files: int, max_bytes: int,
 
     def walk(dir_path: Path, depth: int) -> None:
         nonlocal stopped
-        if stopped or depth > max_depth:
+        if depth > max_depth:
+            if not coverage["truncated"]:
+                coverage["truncated"] = True
+                coverage["limits"].append(f"超过 max-depth={max_depth}，深层目录未扫")
             return
         try:
             entries = sorted(os.scandir(dir_path), key=lambda e: e.name)
@@ -188,6 +223,9 @@ def collect_dir(root: Path, max_files: int, max_bytes: int,
                 return
             if entry.is_dir(follow_symlinks=False):
                 if entry.name in SKIP_DIRS:
+                    coverage["dirs_skipped"] = coverage.get("dirs_skipped", 0) + 1
+                    if len(coverage.get("dirs_skipped_names", [])) < 10:
+                        coverage.setdefault("dirs_skipped_names", []).append(entry.name)
                     continue
                 if _is_reparse(entry):
                     continue
@@ -258,11 +296,12 @@ def collect_text(text: str):
             findings.append(f)
     coverage = {
         "root": "<粘贴文本>", "files_scanned": 1, "files_skipped": 0,
+        "dirs_skipped": 0, "dirs_skipped_names": [],
         "sensitive_skipped": [], "bytes_scanned": len(text.encode("utf-8", errors="replace")),
         "truncated": False,
         "limits": ["确定性层仅覆盖 PITAX 规则集；语义改写类攻击不在本层覆盖内"],
     }
-    return findings, coverage, []
+    return _post_filter(findings), coverage, []
 
 
 # ══════════════════════ 脱敏（架构宪法③：原文不进模型上下文）══════════════════════
@@ -273,17 +312,18 @@ def _notation_invisible(text: str) -> str:
 
 
 def redact_fragment(raw: str, limit: int = 40) -> str:
-    """按 F6 规范脱敏：隐形字符记法化 + 长编码串取前后缀 + 可见片段截断。"""
-    out = _notation_invisible(raw)
+    """按 F6 规范脱敏：密钥模式掩码 + 隐形字符记法化 + 长编码串取前后缀 + 截断。"""
+    out = _mask_secrets(_notation_invisible(raw))
     out = _LONG_TOKEN_RE.sub(lambda m: m.group(0)[:8] + "…" + m.group(0)[-8:], out)
     out = out.replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t")
     return out[:limit]
 
 
 def redact_finding(f: dict) -> dict:
-    """输出前逐条脱敏：证据/解码载荷只保留 记法+长度+SHA8+短片段。"""
-    evidence = (f.get("code_snippet") or "")[:240]
-    decoded = f.get("pitax", {}).get("decoded_payload") if isinstance(f.get("pitax"), dict) else None
+    """输出前逐条脱敏：证据/解码载荷只保留 记法+长度+SHA8+短片段（密钥先掩码）。"""
+    evidence = _mask_secrets((f.get("code_snippet") or "")[:240])
+    pitax = f.get("pitax") if isinstance(f.get("pitax"), dict) else {}
+    decoded = pitax.get("decoded_payload")
     red = {
         "id": f.get("id"),
         "type": f.get("type"),
@@ -299,12 +339,35 @@ def redact_finding(f: dict) -> dict:
         "advice": f.get("suggestion"),
     }
     if decoded:
+        dec = _mask_secrets(str(decoded))
         red["decoded_redacted"] = "[decoded] len={len} sha={sha} frag={frag}".format(
-            len=len(decoded), sha=_sha8(decoded), frag=redact_fragment(str(decoded)))
+            len=len(dec), sha=_sha8(dec), frag=redact_fragment(dec))
     return red
 
 
 # ══════════════════════ 四值判决聚合 ══════════════════════
+
+def _post_filter(findings: list[dict]) -> list[dict]:
+    """emoji 家族序列误报降级：U+200D 两侧均为 emoji 类字符时，E-23 降为 low。"""
+    def _emojiish(ch: str) -> bool:
+        o = ord(ch)
+        return 0x1F000 <= o <= 0x1FAFF or 0x2600 <= o <= 0x27BF or 0x2190 <= o <= 0x21FF \
+            or 0x2B00 <= o <= 0x2BFF or ch in "️⃝"
+
+    for f in findings:
+        if f.get("type") != "PIT-E-23":
+            continue
+        snip = f.get("code_snippet") or ""
+        positions = [i for i, c in enumerate(snip) if c == "\u200d"]
+        if positions and all(
+            (i > 0 and _emojiish(snip[i - 1])) and (i + 1 < len(snip) and _emojiish(snip[i + 1]))
+            for i in positions
+        ):
+            f["severity"] = "low"
+            f["description"] = (str(f.get("description", "")) +
+                                "（该 ZWJ 位于 emoji 家族序列内部，已降级为低风险）").strip()
+    return findings
+
 
 def aggregate(findings: list[dict], coverage: dict, errors: list[str]) -> dict:
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
@@ -320,7 +383,8 @@ def aggregate(findings: list[dict], coverage: dict, errors: list[str]) -> dict:
         if errors:
             coverage["limits"].append(f"扫描过程 {len(errors)} 项错误，覆盖不完整")
     else:
-        verdict, confidence = "clean", 0.9
+        # clean 不过度自信：确定性层覆盖有限（规则集/路由），0.6 而非 0.9
+        verdict, confidence = "clean", 0.6
     return {"verdict": verdict, "verdict_source": "engine",
             "confidence": confidence, "counts": counts}
 
@@ -348,13 +412,26 @@ def build_summary_text(agg: dict, coverage: dict) -> str:
             + ("（已截断，未扫完）" if coverage.get("truncated") else "") + "。")
 
 
+def _unique_path(path: Path) -> Path:
+    """不覆盖已有文件：同名时追加 -1/-2 序号（P1-9）。"""
+    if not path.exists():
+        return path
+    for i in range(1, 100):
+        alt = path.with_name(f"{path.stem}-{i}{path.suffix}")
+        if not alt.exists():
+            return alt
+    return path.with_name(f"{path.stem}-{int(time.time())}{path.suffix}")
+
+
 def write_reports(findings: list[dict], agg: dict, coverage: dict,
                   out_dir: Path | None) -> dict:
     """findings>10 或用户 --out 时落盘 report.jsonl + summary.md（证据为脱敏形态）。"""
     target = out_dir or Path(tempfile.gettempdir()) / f"{SKILL_NAME}-{int(time.time())}"
     target.mkdir(parents=True, exist_ok=True)
+    report_path = _unique_path(target / "report.jsonl")
+    summary_path = _unique_path(target / "summary.md")
     reds = [redact_finding(f) for f in findings]
-    (target / "report.jsonl").write_text(
+    report_path.write_text(
         "\n".join(json.dumps(r, ensure_ascii=False) for r in reds) + "\n",
         encoding="utf-8")
     lines = [f"# AI 内容安检报告（{SKILL_NAME} v{SKILL_VERSION}）", "",
@@ -373,9 +450,9 @@ def write_reports(findings: list[dict], agg: dict, coverage: dict,
                   f"  - 建议：{r.get('advice')}", ""]
     lines += ["---", "*零命中仅代表当前规则集未发现命中，不代表内容绝对安全。*",
               f"*依据 Arcanum Prompt Injection Taxonomy v{PITAX_VERSION}（CC BY 4.0）。*"]
-    (target / "summary.md").write_text("\n".join(lines), encoding="utf-8")
-    return {"report_path": str(target / "report.jsonl"),
-            "summary_path": str(target / "summary.md")}
+    summary_path.write_text("\n".join(lines), encoding="utf-8")
+    return {"report_path": str(report_path),
+            "summary_path": str(summary_path)}
 
 
 def build_envelope(findings: list[dict], agg: dict, coverage: dict,
@@ -389,7 +466,7 @@ def build_envelope(findings: list[dict], agg: dict, coverage: dict,
         "confidence": agg["confidence"],
         "summary": build_summary_text(agg, coverage),
         "ambient": {"one_liner": (
-            f"安检通过：{build_summary_text(agg, coverage)}"
+            f"未检出已知攻击特征（{build_summary_text(agg, coverage)}零命中不代表绝对安全）"
             if agg["verdict"] == "clean" else
             f"⚠️ {build_summary_text(agg, coverage)}——建议先查看报告再决定是否采用该内容")},
         "counts": agg["counts"], "coverage": coverage,
@@ -400,6 +477,29 @@ def build_envelope(findings: list[dict], agg: dict, coverage: dict,
     if report_paths:
         env.update(report_paths)
     return env
+
+
+def _redact_sarif(doc: dict) -> dict:
+    """SARIF 输出脱敏（P0-4，wrapper 层后处理，不改锚内 sarif.py）：
+    message 不拼原始解码文本；properties 里的 evidence/decoded_payload 换脱敏形态；
+    informationUri 指向本仓。"""
+    doc.setdefault("runs", [])
+    for run in doc["runs"]:
+        tool = run.get("tool", {}).get("driver", {})
+        if "coderisk" in str(tool.get("informationUri", "")).lower():
+            tool["informationUri"] = "https://github.com/a9320/tianxi-ai-content-guard"
+        for r in run.get("results", []):
+            msg = str(r.get("message", {}).get("text", ""))
+            if " | decoded payload:" in msg:
+                r["message"]["text"] = msg.split(" | decoded payload:")[0] + \
+                    " | decoded payload: [已脱敏]"
+            props = (r.get("properties") or {}).get("pitax") or {}
+            if props.get("evidence"):
+                props["evidence"] = redact_fragment(str(props["evidence"]))
+            if props.get("decoded_payload"):
+                dec = _mask_secrets(str(props["decoded_payload"]))
+                props["decoded_payload"] = f"[redacted] len={len(dec)} sha={_sha8(dec)}"
+    return doc
 
 
 # ══════════════════════ stdin 宽容解析 ══════════════════════
@@ -436,9 +536,10 @@ def self_check() -> int:
     print(f"{SKILL_NAME} v{SKILL_VERSION} self-check")
     print(f"python: {sys.version.split()[0]}   pitax: v{PITAX_VERSION}   rules: {len(ALL_RULES)}")
     print("network: none（无 requests/urllib/socket/http.client 导入，零联网）")
-    print("dynamic execution: none（无 eval/exec/compile/os.system/subprocess/pickle.loads）")
-    print("writes: none by default（仅 findings>10 或 --out 时写脱敏报告到指定/临时目录）")
-    print("reads: 只读用户指定路径；系统目录拒绝；敏感文件只报存在；符号链接/junction 不跟随")
+    print("dynamic execution: none（无 eval/exec/os.system/subprocess/pickle.loads；compile 仅 re.compile 正则）")
+    print("writes: none by default（仅 findings>10 或 --out 时写脱敏报告；同名不覆盖，自动加序号）")
+    print("reads: 只读用户指定路径（--file 与 --dir 同口径防护）；系统目录拒绝；"
+          "敏感文件(.env/*.pem/id_rsa 等)拒绝读取只报存在；符号链接/junction 不跟随")
     anchor = engine_dir / "ENGINE-ANCHOR.txt"
     for p in sorted(engine_dir.glob("*.py")):
         h = hashlib.sha256(p.read_bytes()).hexdigest()
@@ -452,8 +553,9 @@ def self_check() -> int:
     return 0
 
 
-def decode_review(payload: str) -> int:
-    """编码载荷分层复核（≤3 层 / ≤64KB，只解码匹配，不执行）。"""
+def decode_review(payload: str, show_fragment: bool = False) -> int:
+    """编码载荷分层复核（≤3 层 / ≤64KB，只解码匹配，不执行）。
+    默认不打印明文片段（防泄露）；--show-fragment 显式查看（片段仍过脱敏）。"""
     data = payload[:64 * 1024]
     print(f"输入 len={len(payload)} sha={_sha8(payload)}")
     for layer in range(1, 4):
@@ -466,8 +568,10 @@ def decode_review(payload: str) -> int:
         except (binascii.Error, ValueError):
             print(f"layer {layer}: base64 解码失败，停止剥离")
             break
-        print(f"layer {layer}: len={len(peeled)} sha={_sha8(peeled)} "
-              f"frag={redact_fragment(peeled)}")
+        line = f"layer {layer}: len={len(peeled)} sha={_sha8(peeled)}"
+        if show_fragment:
+            line += f" frag={redact_fragment(peeled)}"
+        print(line)
         if len(peeled) >= 256 * 1024:
             print("达到 256KB 解码输出上限，停止")
             break
@@ -482,7 +586,8 @@ def _err(code: str, field: str, message: str, hint: str = "") -> int:
                "message": message, "hint": hint},
               sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
-    return 3
+    # 契约：2=参数/输入类错误（含防护拒绝），3=运行时错误
+    return 2 if code in ("INVALID_ARGUMENT", "NOT_FOUND", "GUARD_REJECTED") else 3
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -505,6 +610,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", help="报告输出目录（默认：仅 findings>10 时写系统临时目录）")
     ap.add_argument("--sarif", help="导出 SARIF 2.1.0 到指定文件（仓库模式用）")
     ap.add_argument("--decode", help=argparse.SUPPRESS)
+    ap.add_argument("--show-fragment", action="store_true",
+                    help="--decode 时显式查看脱敏片段（默认只给长度+哈希）")
     ap.add_argument("--self-check", action="store_true")
     ap.add_argument("--version", action="version",
                     version=f"{SKILL_NAME} {SKILL_VERSION}")
@@ -513,7 +620,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_check:
         return self_check()
     if args.decode is not None:
-        return decode_review(args.decode)
+        return decode_review(args.decode, show_fragment=args.show_fragment)
 
     # session JSONL 遥测锚：每次执行在 stderr 留稳定标记，供触发率统计
     print(f"[{SKILL_NAME}] v{SKILL_VERSION} engine=pitax-{PITAX_VERSION}",
@@ -524,6 +631,9 @@ def main(argv: list[str] | None = None) -> int:
         return _err("INVALID_ARGUMENT", "text|file|dir",
                     "必须且只能提供 --text / --file / --dir 之一",
                     "长文本请写入临时文件后用 --file，勿走命令行参数")
+    if args.text is not None and not args.text.strip():
+        return _err("INVALID_ARGUMENT", "text", "待检文本为空",
+                    "提供非空内容，或用 --file 指定文件")
 
     started = time.monotonic()
     findings: list[dict] = []
@@ -534,13 +644,23 @@ def main(argv: list[str] | None = None) -> int:
             findings, coverage, errors = collect_text(args.text)
         elif args.file is not None:
             if args.file == "-":
-                findings, coverage, errors = collect_text(read_stdin_text())
+                stdin_text = read_stdin_text()
+                if not stdin_text.strip():
+                    return _err("INVALID_ARGUMENT", "file", "stdin 输入为空",
+                                "提供非空内容")
+                findings, coverage, errors = collect_text(stdin_text)
             else:
                 fpath = Path(args.file).expanduser().resolve()
                 if not fpath.is_file():
                     return _err("NOT_FOUND", "file", f"文件不存在：{fpath}")
-                findings = scan_file(fpath.name, _decode_bytes(_read_file_bytes(fpath)))
+                _guard_file(fpath)  # P0-3：file mode 与 dir mode 同防护口径
+                # 传保留路径结构的字符串（非 basename），让 .cursor/rules 等
+                # AI 配置路径在单文件模式下仍可识别（P0-2）
+                path_hint = args.file.replace("\\", "/")
+                findings = scan_file(path_hint, _decode_bytes(_read_file_bytes(fpath)))
+                findings = _post_filter(findings)
                 coverage = {"root": str(fpath), "files_scanned": 1, "files_skipped": 0,
+                            "dirs_skipped": 0, "dirs_skipped_names": [],
                             "sensitive_skipped": [], "bytes_scanned": fpath.stat().st_size,
                             "truncated": False, "limits": [
                                 "确定性层仅覆盖 PITAX 规则集；语义改写类攻击不在本层覆盖内"]}
@@ -551,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
             files_map, coverage, errors = collect_dir(
                 root, args.max_files, args.max_bytes, args.max_depth,
                 args.timeout, config_only=(args.mode == "config"))
-            findings = scan_repo(files_map)
+            findings = _post_filter(scan_repo(files_map))
     except ValueError as exc:
         return _err("GUARD_REJECTED", "path", str(exc),
                     "系统目录/敏感路径/超大文件被防护策略拒绝")
@@ -571,10 +691,12 @@ def main(argv: list[str] | None = None) -> int:
     envelope = build_envelope(findings, agg, coverage, report_paths,
                               int((time.monotonic() - started) * 1000))
     if args.sarif:
-        Path(args.sarif).write_text(
-            json.dumps(build_sarif(findings, SKILL_NAME, SKILL_VERSION),
+        sarif_path = _unique_path(Path(args.sarif))
+        sarif_path.parent.mkdir(parents=True, exist_ok=True)
+        sarif_path.write_text(
+            json.dumps(_redact_sarif(build_sarif(findings, SKILL_NAME, SKILL_VERSION)),
                        ensure_ascii=False, indent=2), encoding="utf-8")
-        envelope["sarif_path"] = str(Path(args.sarif))
+        envelope["sarif_path"] = str(sarif_path)
 
     if args.format == "markdown":
         print(f"## {_risk_word(agg['verdict'])}（{agg['verdict']}）")

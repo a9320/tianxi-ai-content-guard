@@ -72,7 +72,8 @@ def test_clean_text():
     d = envelope(r)
     assert d["verdict"] == "clean"
     assert sum(d["counts"].values()) == 0
-    assert "安检通过" in d["ambient"]["one_liner"]
+    assert "未检出" in d["ambient"]["one_liner"]
+    assert "不代表绝对安全" in d["ambient"]["one_liner"]
     assert d["limits"]
 
 
