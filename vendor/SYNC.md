@@ -18,3 +18,13 @@
 ```
 engine_synced_at: <arcanum-spark commit> (首次同步待填)
 ```
+
+## 分叉记录（v1.2.0 起，刻意分叉，勿"修复"回上游行为）
+
+| 项 | 上游管线行为 | 本仓 skill 行为 | 原因 |
+|---|---|---|---|
+| 路由 | config/doc/其他互斥分流 | 全量基础检测+按路径追加 | 互斥路由漏检（复测 P0-2） |
+| 跳过目录 | SKIP_DIRS 含 node_modules/dist/build | 只跳 VCS/缓存，**扫** node_modules/dist/build | 藏毒攻击面（复测 §3.4） |
+| zh_rules.py | 不存在 | 中文/劫持覆盖层（confidence 70） | 中文市场+判决劫持（上游双语重构落地后评估合并） |
+
+上游双语重构落地时的合并流程：对比 zh_rules 关键词/正则与上游规则 JSON → 重叠部分删覆盖层改用上游 → 更新本表与锚。

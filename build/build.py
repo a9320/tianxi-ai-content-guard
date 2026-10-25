@@ -43,7 +43,11 @@ def check_versions():
     skill_md = (SKILL / "SKILL.md").read_text(encoding="utf-8")
     m = re.search(r"^version:\s*(\S+)", skill_md, re.M)
     assert m, "SKILL.md 缺 version 字段"
-    assert v == pkg == meta == m.group(1), f"版本号不一致：{v}/{pkg}/{meta}/{m.group(1)}"
+    entry = (SKILL / "scripts" / "entry.py").read_text(encoding="utf-8")
+    e = re.search(r'^SKILL_VERSION\s*=\s*"([^"]+)"', entry, re.M)
+    assert e, "entry.py 缺 SKILL_VERSION 常量"
+    assert v == pkg == meta == m.group(1) == e.group(1), \
+        f"版本号不一致（五处须同改）：{v}/{pkg}/{meta}/{m.group(1)}/{e.group(1)}"
     return v
 
 
