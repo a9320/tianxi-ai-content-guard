@@ -1,6 +1,6 @@
 {
   "name": "ai-content-guard",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Local, deterministic detector for prompt injection, invisible-character smuggling, encoded payloads, and AI config backdoors. Engine verdicts, model explains.",
   "license": "MIT",
   "author": "AI溢出安全实验室",

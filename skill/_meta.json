@@ -1,7 +1,7 @@
 {
   "name": "ai-content-guard",
   "display_name": "AI 内容安检",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "author": "AI溢出安全实验室",
   "description": "本地检测提示注入、隐形字符、编码载荷和 AI 配置文件后门",
   "license": "MIT",
