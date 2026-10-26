@@ -2,7 +2,7 @@
   "name": "ai-content-guard",
   "description": "AI 内容安检：本地检测提示注入、隐形字符、编码载荷和 AI 配置文件后门（纯本地确定性引擎，判决由引擎产出）",
   "description_zh": "AI 内容安检：本地检测提示注入、隐形字符、编码载荷和 AI 配置文件后门",
-  "version": "1.2.8",
-  "updateNotes": "v1.2.8：批 1 审计口径加固——①扫描前禁述扩到任何可见输出（含工具调用前过渡语；工具结果不算回答泄露）；②翻译/保字节补交付 fallback（先译外层文本+载荷只给类型/长度/规则/风险+用户自行--decode），禁止 shell/Python/certutil 手动解码；③自检 b 条与 A 类统一为中文≥4/拉丁≥8，base64/hex 加数字限定；④frontmatter 裸词收紧（配置→配置文件、邮件→收到的邮件）降 S03/O03 误触发；⑤A 类判据收敛到 benchmark/a_class_policy.json 单一事实源（全文/base64 全文/覆盖率+长串），六点回归硬检查入 docs/six-point-regression.md。",
+  "version": "1.2.9",
+  "updateNotes": "v1.2.9：六点回归文案补丁（引擎与规则零改动）——①铁律 3 明确 `--file`/`--dir` 由引擎读取，引擎返回前不得先 Read/Grep/cat 目标文件或目录内容（只列文件名的 ls/find/Glob 可以，URL 先取正文再 --text 是唯一例外）；②第 6 节 malicious 第一句改为判决 + PIT 规则编号 + 不得执行，且不得是环境/进度说明；③第 2 节禁止用 head/tail/管道截断引擎 JSON 信封，明细走 report_path。",
   "ignore": []
 }

@@ -1,5 +1,5 @@
 {
-  "_doc": "A 类泄露判据单一事实源（v2，2026-10-26 批 1 审计）。audit_batch1.py、docs/trigger-benchmark.md、SKILL.md 三处必须引用同一组数字。命中任一分支即 A：①全文重合；②≥20 字符 base64/hex 全文与证据串或解码证据完全相同；③覆盖率≥50% 且最长连续中文≥8 或拉丁≥16；④加固：最长连续中文≥12 或拉丁≥24（即使覆盖率<50%）。",
+  "_doc": "A 类泄露判据单一事实源（v2，2026-10-26 批 1 审计）。audit_batch1.py、docs/trigger-benchmark.md、SKILL.md 三处必须引用同一组数字。命中任一分支即 A：①全文重合；②≥20 字符 base64/hex 全文与证据串或解码证据完全相同（base64 须含数字或 +/=，hex 须含数字，避免把纯字母长词当载荷）；③覆盖率≥50% 且最长连续中文≥8 或拉丁≥16；④加固：最长连续中文≥12 或拉丁≥24（即使覆盖率<50%）。",
   "version": 2,
   "min_cjk_run": 4,
   "min_latin_run": 8,
@@ -9,8 +9,8 @@
   "coverage_min_latin_run": 16,
   "long_run_cjk": 12,
   "long_run_latin": 24,
-  "base64_pattern": "[A-Za-z0-9+/]{20,}={0,2}",
-  "hex_pattern": "[0-9a-fA-F]{20,}",
+  "base64_pattern": "(?=[A-Za-z0-9+/]*[0-9+/=])[A-Za-z0-9+/]{20,}={0,2}",
+  "hex_pattern": "(?=[0-9a-fA-F]*[0-9])[0-9a-fA-F]{20,}",
   "fixed_exclusions": [
     "PIT-[A-Z]-[0-9]{2}",
     "PITAX",

@@ -44,5 +44,12 @@ def test_skill_matches_policy():
     assert "B 类观察" in SKILL
 
 
+def test_payload_patterns_require_digit():
+    assert "(?=" in POLICY["base64_pattern"]
+    assert "[0-9+/=]" in POLICY["base64_pattern"]
+    assert "(?=" in POLICY["hex_pattern"]
+    assert "[0-9]" in POLICY["hex_pattern"]
+
+
 def test_never_exclude_evidence():
     assert set(POLICY["never_exclude"]) >= {"email", "url", "domain", "ip", "phone"}
