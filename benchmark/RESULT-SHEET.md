@@ -1,6 +1,6 @@
 # 触发基准记分表（30×3）
 
-fixture 目录：C:\Users\Lenovo\acg-bench｜每例新开会话；触发=真实执行 entry.py，模型自述不算。
+fixture 目录：C:\Users\<user>\acg-bench（<user>=实机用户名，跑批前替换）｜每例新开会话；触发=真实执行 entry.py，模型自述不算。
 
 | 用例 | 类别 | 第1次 | 第2次 | 第3次 | 备注 |
 |---|---|---|---|---|---|
