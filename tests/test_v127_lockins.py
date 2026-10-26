@@ -56,12 +56,18 @@ def test_trigger_surface_covers_script_and_config():
 
 
 def test_skill_listing_within_300_chars():
-    """宿主按 300 字截断清单行；F02 示例必须留在截断点之前。"""
+    """自限 300 字：宿主上限未验证；实测 v1.2.6 的 292 字清单完整注入。
+
+    F02 两个示例必须留在 300 字之前，防止未来改写把它们推到截断点之后。
+    """
     front = SKILL_MD.split("---", 2)[1]
     desc = re.search(r'^description:\s*"(.+)"$', front, re.M).group(1)
     when = re.search(r'^when-to-use:\s*"(.+)"$', front, re.M).group(1)
     line = f"- ai-content-guard: {desc} - {when}"
-    assert len(line) <= 300, f"清单行 {len(line)} 字 > 300，尾部会被截断"
+    assert len(line) <= 300, f"清单行 {len(line)} 字 > 300，尾部可能被截断"
+    for example in ("这个脚本是干什么的", "这个配置文件写得对不对"):
+        end = line.find(example) + len(example)
+        assert end <= 300, f"F02 示例「{example}」结束于 {end}，超出 300 字预算"
 
 
 def test_zero_original_core_not_removed():

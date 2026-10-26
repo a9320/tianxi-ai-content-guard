@@ -5,4 +5,4 @@
 c3882e5f568a8da59bedaa213c4d26d00b532a23aff02886d7fdc9739d657336  skill/scripts/engine/sarif.py
 d0120206eed7acfcadbd145a23c3fd014defa14eaf9ce241f7b40af4815955a7  skill/scripts/engine/scan.py
 9f71e2ddb6f0ed193ea7848e8d02edae7d73c5b5b8bdac2626fff5b9093b4ee2  skill/scripts/engine/zh_rules.py
-845ae9a554ca5957465b82c75b98b3dc6e2ea00fd3aea19f71383f3d947821ea  skill/scripts/entry.py
+e53dce643da331eadc862c39ecac61dbf6b26b6c34df4ad6e15aef97e1a0b80f  skill/scripts/entry.py
