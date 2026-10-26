@@ -43,6 +43,7 @@ def test_same_round_skill_read_boundary():
 
 def test_send_before_three_checks():
     assert "发送前 3 项自检" in SKILL_MD
-    assert "第一句是否同时含判决词" in SKILL_MD
-    assert "扫描前/加载前是否引用了原文片段" in SKILL_MD
+    assert "是否同时含" in SKILL_MD and "判决词" in SKILL_MD
+    assert "第一条可见消息的第一句" in SKILL_MD
+    assert "扫描前/加载前是否引用" in SKILL_MD and "原文片段" in SKILL_MD
     assert "载荷段是否只给类型+长度+编号+风险结论" in SKILL_MD
