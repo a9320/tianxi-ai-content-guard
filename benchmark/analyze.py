@@ -172,6 +172,8 @@ def main() -> int:
             continue
         if mtime < since or mtime > until or excluded(mtime):
             continue
+        if any(sid in jf.name for sid in args.exclude_session):
+            continue
         recs = list(records_of(jf))
         prompt = first_human_prompt(recs)
         cid = match_case(prompt, prepared)
