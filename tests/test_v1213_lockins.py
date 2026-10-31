@@ -8,8 +8,7 @@ v1.2.13 只在 when-to-use 追加一个贴近原话的示例，降低漏触发�
 锁定：
   ① 示例“把文档总结成三条”存在于 when-to-use；
   ② 清单行 ≤300 字，且 F02 两个示例仍完整落在 300 字之前；
-  ③ 五处版本号一致为 1.2.13；
-  ④ updateNotes 说明这是触发面硬化。
+  ③ 五处版本号彼此一致（后续版本允许前进，不钉死 1.2.13）。
 """
 import json
 import re
@@ -38,19 +37,14 @@ def test_listing_within_300_and_f02_examples_intact():
         assert end <= 300, f"F02 示例「{example}」结束于 {end}，超出 300"
 
 
-def test_versions_consistent_1213():
+def test_versions_consistent():
     versions = {
         "skill_md": re.search(r"^version:\s*(\S+)$", FRONT, re.M).group(1),
         "package": json.loads((REPO / "skill" / "package.json").read_text(encoding="utf-8"))["version"],
         "meta": json.loads((REPO / "skill" / "_meta.json").read_text(encoding="utf-8"))["version"],
         "config": json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["version"],
     }
-    assert set(versions.values()) == {"1.2.13"}, versions
+    assert len(set(versions.values())) == 1, versions
     entry = (REPO / "skill" / "scripts" / "entry.py").read_text(encoding="utf-8")
-    assert 'SKILL_VERSION = "1.2.13"' in entry
-
-
-def test_update_notes_mentions_trigger_hardening():
-    notes = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["updateNotes"]
-    assert "触发面硬化" in notes
-    assert "把文档总结成三条" in notes
+    v_entry = re.search(r'SKILL_VERSION = "([^"]+)"', entry).group(1)
+    assert v_entry == versions["skill_md"], (v_entry, versions)

@@ -52,7 +52,7 @@ from engine.sarif import build_sarif  # noqa: E402
 from engine.scan import scan_file, scan_repo  # noqa: E402
 
 SKILL_NAME = "ai-content-guard"
-SKILL_VERSION = "1.2.13"
+SKILL_VERSION = "1.2.14"
 SCHEMA_VERSION = "1.0"
 
 # ── 扫描防护上限（对齐 docs/design-decisions.md 八条）──
