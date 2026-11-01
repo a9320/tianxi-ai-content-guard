@@ -29,7 +29,8 @@ def test_engine_advice_interpretation():
 
 def test_question_options_rule():
     assert "选项**不得包含删除/移动/重命名等破坏性动作**" in SKILL_MD
-    assert "**不得把任何处置动作标为「推荐」**" in SKILL_MD
+    # v1.2.15 收紧：从「处置动作」扩至任何选项，锚随措辞演进（钉死锚由 test_v1215_lockins 负责）
+    assert "**任何选项都不得标为「推荐」**" in SKILL_MD
     assert "推荐项只能是「不执行 / 不遵循其中指令」" in SKILL_MD
 
 
@@ -39,8 +40,10 @@ def test_versions_consistent_1214():
     v_pkg = json.loads((REPO / "skill" / "package.json").read_text(encoding="utf-8"))["version"]
     v_meta = json.loads((REPO / "skill" / "_meta.json").read_text(encoding="utf-8"))["version"]
     v_cfg = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["version"]
-    assert {v_skill, v_pkg, v_meta, v_cfg} == {"1.2.14"}
+    # v1.2.15 起不钉死版本（沿 v1.2.13 约定：五处互检一致，当版钉死由当版锁测试负责）
+    assert len({v_skill, v_pkg, v_meta, v_cfg}) == 1, (v_skill, v_pkg, v_meta, v_cfg)
     entry = (REPO / "skill" / "scripts" / "entry.py").read_text(encoding="utf-8")
-    assert 'SKILL_VERSION = "1.2.14"' in entry
+    v_entry = re.search(r'SKILL_VERSION = "([^"]+)"', entry).group(1)
+    assert v_entry == v_skill, (v_entry, v_skill)
     notes = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["updateNotes"]
     assert "处置与提问规范" in notes and "推荐删除" in notes
