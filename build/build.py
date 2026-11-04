@@ -50,8 +50,20 @@ _SANITIZE_TRANSFORMS = {
     "engine/rules.py": [
         ("参赛红线：编号以官方为准", "硬红线：编号以官方为准"),
         ("曾因外部审核（GLM-5.3）误称", "曾因外部评审误称"),
-        ("参赛主推的 4 条高价值规则", "4 条高价值规则")],
+        ("参赛主推的 4 条高价值规则", "4 条高价值规则"),
+        # PITAX 官网子路径已 404（2026-11-04 实测）；改指仍可访问的官方仓库
+        ("https://arcanum-sec.com/pitax", "https://github.com/Arcanum-Sec/arc_pi_taxonomy")],
 }
+
+# SARIF schema URL 在源头跨行拼接，第三方扫描器按文本提取会拿到半截 404 地址；
+# 且 raw.githubusercontent.com 在部分网络不可达（2026-11-04 实测拉取超时），
+# 发行包内统一替换为 OASIS 官方地址（单行、application/json、可达）。
+_SARIF_SCHEMA_BROKEN = re.compile(
+    r'"https://raw\.githubusercontent\.com/oasis-tcs/sarif-spec/main/"\s*'
+    r'"sarif-2\.1/schema/sarif-schema-2\.1\.0\.json"')
+_SARIF_SCHEMA_JOINED = (
+    '"https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/'
+    'sarif-schema-2.1.0.json"')
 
 
 def _sanitize_engine(rel: str, data: bytes) -> bytes:
@@ -64,6 +76,10 @@ def _sanitize_engine(rel: str, data: bytes) -> bytes:
         if old not in text:
             raise SystemExit(f"[净化] 预期字符串未找到（上游已变？）：{posix}: {old[:30]}")
         text = text.replace(old, new)
+    if key == "engine/sarif.py":
+        text, n = _SARIF_SCHEMA_BROKEN.subn(_SARIF_SCHEMA_JOINED, text)
+        if n != 1:
+            raise SystemExit(f"[净化] SARIF schema URL 拼接形态已变（命中 {n} 次）：{posix}")
     import ast
     ast.parse(text)  # 净化后语法校验
     return text.encode("utf-8")
