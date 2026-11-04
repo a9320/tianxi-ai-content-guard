@@ -34,8 +34,9 @@ def test_versions_consistent_1215():
     v_pkg = json.loads((REPO / "skill" / "package.json").read_text(encoding="utf-8"))["version"]
     v_meta = json.loads((REPO / "skill" / "_meta.json").read_text(encoding="utf-8"))["version"]
     v_cfg = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["version"]
-    assert {v_skill, v_pkg, v_meta, v_cfg} == {"1.2.15"}
+    # v1.2.16 起不钉死版本（沿 v1.2.13 约定：五处互检一致，当版钉死由当版锁测试负责）
+    assert len({v_skill, v_pkg, v_meta, v_cfg}) == 1, (v_skill, v_pkg, v_meta, v_cfg)
     entry = (REPO / "skill" / "scripts" / "entry.py").read_text(encoding="utf-8")
-    assert 'SKILL_VERSION = "1.2.15"' in entry
-    notes = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["updateNotes"]
-    assert "提问推荐项收紧" in notes and "宿主可能自动执行" in notes
+    v_entry = re.search(r'SKILL_VERSION = "([^"]+)"', entry).group(1)
+    assert v_entry == v_skill, (v_entry, v_skill)
+    # updateNotes 按版本滚动，不钉文本（内容正确性由当版锁测试负责）

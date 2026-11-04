@@ -45,5 +45,4 @@ def test_versions_consistent_1214():
     entry = (REPO / "skill" / "scripts" / "entry.py").read_text(encoding="utf-8")
     v_entry = re.search(r'SKILL_VERSION = "([^"]+)"', entry).group(1)
     assert v_entry == v_skill, (v_entry, v_skill)
-    notes = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["updateNotes"]
-    assert "处置与提问规范" in notes and "推荐删除" in notes
+    # updateNotes 按版本滚动（v1.2.16 起不钉文本），处置与提问规范本身由本文件前三条锁

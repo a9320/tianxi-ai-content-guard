@@ -78,6 +78,29 @@ _P_TOOLABUSE_ZH = re.compile(
     r"(?:文件|数据|目录|记录)"
     r"|(?:执行|运行)[^。.\n]{0,10}(?:(?:rm|mkfs|format|del|shutdown)\b)", re.I)
 
+# ── 工具滥用（英文）：与中文同语义，补齐 2026-11-04 实测确认的唯一英文盲区
+#    （英文"诱导执行破坏性命令"此前判 clean）。约束：
+#    · ① 必须有祈使动词（run/execute/must…）才算"要求执行"，描述性语句不命中；
+#    · ② 只删构建产物的常见开发指令（rm -rf node_modules 等）不报，避免仓库扫描噪声；
+#    · ③ 全量删除必须祈使式且排除临时/缓存类限定词。──
+_BENIGN_RM_TARGETS = (r"node_modules|dist|build|\.next|\.cache|__pycache__|"
+                      r"target|coverage|\.venv|venv|out")
+_P_TOOLABUSE_EN = re.compile(
+    r"(?:\b(?:please|now|then|and|just)\b\s*)?"
+    r"(?:\b(?:run|execute|exec|invoke|perform|type|paste|use|must|should)\b"
+    r"|\bneed\s+to\b)[^.\n]{0,24}?"
+    r"(?:rm\s+-[a-z]*[rf][a-z]*\b(?![^.\n]{0,40}\b(?:" + _BENIGN_RM_TARGETS + r")\b)"
+    r"|mkfs(?:\.\w+)?\b|\bdd\s+if=|\bshutdown\b|\bformat\s+[a-z]:"
+    r"|\bdel\s+/[fsq]|\brmdir\s+/[sq])"
+    r"|(?:^|[.!?]\s+|;\s*|\b(?:please|now|then|and)\b\s*)"
+    r"(?:delete|erase|wipe|destroy|remove)\s+(?:all|every)\b"
+    r"(?!\s+(?:temporary|temp|cache|cached|expired|stale|unused|logs?))"
+    r"[^.\n]{0,28}\b(?:files?|data|directories|folders|disk|drives?)\b"
+    r"|(?:^|[.!?]\s+|;\s*|\b(?:please|now|then)\b\s*)"
+    r"(?:wipe|format|erase|zero)\s+(?:out\s+)?(?:the\s+)?"
+    r"(?:disk|drive|hard\s*drive|filesystem|partition|whole\s+disk)\b",
+    re.I | re.M)
+
 # ── 编码载荷解码后判定：复用引擎关键词表 + 覆盖层补充（英文短语全集）──
 ENCODED_KEYWORDS_ZH = (
     "忽略", "指令", "密钥", "密码", "系统提示", "发送", "删除", "越狱",
@@ -112,6 +135,7 @@ _RULESETS = [
     (_P_EXFIL_ZH3, "exfiltration", "high"),
     (_P_EXFIL_EN, "exfiltration", "high"),
     (_P_TOOLABUSE_ZH, "tool_abuse", "critical"),
+    (_P_TOOLABUSE_EN, "tool_abuse", "critical"),
 ]
 
 

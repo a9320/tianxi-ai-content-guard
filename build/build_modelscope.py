@@ -67,10 +67,17 @@ def main() -> int:
         data = p.read_bytes()
         if rel.suffix == ".py":
             data = build_mod._sanitize_engine(rel, data)
+        # 统一 LF：跨平台注册表的 frontmatter/脚本解析不应依赖 CRLF
+        if rel.suffix in {".md", ".py", ".txt", ".json", ".yaml", ".yml"}:
+            data = data.replace(b"\r\n", b"\n")
         written[rel.as_posix()] = data
 
     # skill-card.md（信任卡片）
-    written["skill-card.md"] = SKILL_CARD.read_bytes()
+    written["skill-card.md"] = SKILL_CARD.read_bytes().replace(b"\r\n", b"\n")
+
+    # .gitattributes：强制 LF 检出。否则 Windows 默认 core.autocrlf=true 会在
+    # clone 时把 LF 转 CRLF，导致 ENGINE-ANCHOR 的字节哈希全部 MISMATCH。
+    written[".gitattributes"] = b"* text=auto eol=lf\n"
 
     # 包内完整性锚：按最终发行内容重算
     lines = []

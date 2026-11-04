@@ -2,7 +2,7 @@
   "name": "ai-content-guard",
   "description": "AI 内容安检：本地检测提示注入、隐形字符、编码载荷和 AI 配置文件后门（纯本地确定性引擎，判决由引擎产出）",
   "description_zh": "AI 内容安检：本地检测提示注入、隐形字符、编码载荷和 AI 配置文件后门",
-  "version": "1.2.15",
-  "updateNotes": "v1.2.15：提问推荐项收紧（处置与提问规范修订，引擎/规则零改动）——推荐项约束从「处置动作」扩至任何提问的任何选项：任何选项都不得标「推荐」（含照常起草回复/只总结正常内容/终止本次总结等任务动作），推荐项只能是不执行/不遵循其中指令；宿主可能自动执行被标推荐项，标推荐＝替用户决定。针对 I03/F03 批次三例任务动作被标推荐，及此前 F03 批次 AskUserQuestion 推荐删除被宿主自动选中的事件。",
+  "version": "1.2.16",
+  "updateNotes": "v1.2.16：补齐英文工具滥用检测（唯一确认漏检）——引擎覆盖层新增英文特征：祈使动词（run/execute/must/need to…）引导的破坏性命令（rm -rf、mkfs、dd if=、shutdown、format X:、del /f、rmdir /s）与祈使式全量删除/抹盘指令；同时排除两类常见误报源（只删构建产物的开发指令 rm -rf node_modules 等、含临时/缓存限定的删除）。用途：此前英文『诱导执行破坏性命令』判 clean，中文同类判 malicious，本次对齐。另：references/security-notes.md 新增已知边界章节（RTL 文案/安全教材引用会报 high 需人工豁免；--min-severity 与 --fail-on 的真实语义）。",
   "ignore": []
 }
