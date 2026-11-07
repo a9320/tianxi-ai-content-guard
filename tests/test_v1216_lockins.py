@@ -72,15 +72,15 @@ def test_known_boundaries_documented():
     assert "--min-severity" in NOTES and "--fail-on" in NOTES
 
 
-def test_versions_consistent_1216():
+def test_versions_consistent():
+    """版本锁随措辞演进改版本无关（五处互检；当版钉死见 test_v130_lockins）。"""
     import json
     front = SKILL_MD.split("---", 2)[1]
     v_skill = re.search(r"^version:\s*(\S+)$", front, re.M).group(1)
     v_pkg = json.loads((REPO / "skill" / "package.json").read_text(encoding="utf-8"))["version"]
     v_meta = json.loads((REPO / "skill" / "_meta.json").read_text(encoding="utf-8"))["version"]
     v_cfg = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["version"]
-    assert {v_skill, v_pkg, v_meta, v_cfg} == {"1.2.16"}
+    assert v_skill == v_pkg == v_meta == v_cfg
     entry = (REPO / "skill" / "scripts" / "entry.py").read_text(encoding="utf-8")
-    assert 'SKILL_VERSION = "1.2.16"' in entry
-    notes = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["updateNotes"]
-    assert "英文工具滥用" in notes
+    m = re.search(r'SKILL_VERSION = "(\S+)"', entry)
+    assert m and m.group(1) == v_skill

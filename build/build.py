@@ -134,10 +134,11 @@ def build(channel: str, dist: Path, version: str):
             if channel == "clawhub" and rel.as_posix() == "SKILL.md":
                 data = data.decode("utf-8").replace("<skill 目录>", "{baseDir}").encode("utf-8")
             zf.writestr(rel.as_posix(), data)  # arcname 不带 skill/ 前缀 → SKILL.md 在根
-        # 包内完整性锚：8 件全列——净化件用净化后哈希，其余用原哈希
+        # 包内完整性锚：10 件全列——净化件用净化后哈希，其余用原哈希
         # （self-check 在装好的包里仍全 MATCH；工作区锚=上游同步证据不受影响）
         import hashlib
-        anchored = ["engine/__init__.py", "engine/detectors.py", "engine/rules.py",
+        anchored = ["engine/__init__.py", "engine/detectors.py", "engine/descriptions_en.py",
+                    "engine/report_lang.py", "engine/rules.py",
                     "engine/sanitizer.py", "engine/sarif.py", "engine/scan.py",
                     "engine/zh_rules.py", "entry.py"]
         lines = []

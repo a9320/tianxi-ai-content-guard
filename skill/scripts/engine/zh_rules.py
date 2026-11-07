@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-from .detectors import _ENCODED_TARGET_RE, is_ai_config_path
+from .detectors import _DEFENSIVE_RE, _ENCODED_TARGET_RE, is_ai_config_path
 from .rules import get_rule
 
 ZH_CONFIDENCE = 70
@@ -175,6 +175,8 @@ def scan_zh(content: str, path: str, _n: int = 0) -> list[dict]:
                 code = code_cfg
                 if not is_cfg and is_comment:
                     code = "PIT-T-51"
+                if kind == "prompt_leak" and _DEFENSIVE_RE.search(line):
+                    continue  # 防御性表述豁免（对齐上游 _is_defensive：仅系统提示类 + 行含防御标记词）
                 msg = {
                     "override": "检测到中文指令覆盖类注入（要求忽略既有指令/规则）。",
                     "role_hijack": "检测到中文角色劫持/越狱指令。",

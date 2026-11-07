@@ -21,9 +21,11 @@ from __future__ import annotations
 import base64
 import codecs
 import re
+import os
 from dataclasses import dataclass, field
 
 from .rules import get_rule
+from .descriptions_en import description_for, suggestion_for
 
 # ────────────────────────── 数据结构 ──────────────────────────
 @dataclass
@@ -50,13 +52,13 @@ class Finding:
             "confidence": confidence,
             "cwe": rule.get("cwe"),
             "mitre_atlas": rule.get("mitre_atlas"),
-            "description": self.message,
+            "description": description_for(self.pitax_code, self.message),
             "file": self.file,
             "line": self.line,
             "language": language,
             "code_snippet": self.evidence[:240],
             "agent": "agent_0_sanitizer",
-            "suggestion": (
+            "suggestion": suggestion_for(
                 "移除隐藏内容/恶意指令；若为误报请在 CI 中标记豁免并说明理由。"
             ),
             "pitax": {
@@ -197,26 +199,47 @@ def is_ai_config_path(path: str) -> bool:
 
 _CONFIG_PATTERNS = [
     r"(?i)ignore\s+(all\s+)?previous\s+instructions",
+    # 2026-11-01 Copilot 现场漏报 PS03 实证："SYSTEM OVERRIDE: ignore safety rules…" 0 命中
+    r"(?i)ignore\s+(all\s+)?(?:previous\s+)?(?:safety|security)\s+(?:rules|guidelines)",
+    r"(?i)system\s+overrides?\b",
     r"(?i)override\s+(all\s+)?(previous\s+)?instructions",
     r"(?i)disregard\s+(all\s+)?(previous\s+)?instructions",
     r"(?i)system\s*prompt",
     r"(?i)you\s+are\s+now",
     r"(?i)\bDAN\s+mode\b",
     r"(?i)developer\s+mode\b",
-    r"(?i)jailbreak",
+    r"(?i)(?:enable|enter|activate)\s+(?:the\s+)?jailbreak|jailbreak\s+mode",
     r"(?i)disable\s+safety\s+guidelines",
     r"(?i)bypass\s+(all\s+)?safety",
+    r"忽略(?:之前|以前|上面|上述)(?:的)?(?:所有)?(?:指令|提示|要求)",
+    r"无视(?:之前|以前|上面|上述)(?:的)?(?:所有)?(?:指令|提示|要求)",
+    r"你现在(?:是|成为)(?:一名)?(?:攻击者|黑客)",
+    r"绕过(?:所有)?安全",
+    r"以前の指示を無視",
+    r"跳过(?:所有)?安全",
 ]
 _CONFIG_RE = [re.compile(p) for p in _CONFIG_PATTERNS]
+
+# 防御性写法（"Never reveal the system prompt"）是合规建议，不是注入（NEG-3 实证）
+_SYSTEM_PROMPT_PATTERN = r"(?i)system\s*prompt"
+_DEFENSIVE_RE = re.compile(
+    r"(?i)\b(?:never|don'?t|do not|must not|should not|refuse|avoid)\b|严禁|禁止|不要|不得"
+)
+
+
+def _is_defensive(rx: re.Pattern[str], line: str) -> bool:
+    return rx.pattern == _SYSTEM_PROMPT_PATTERN and bool(_DEFENSIVE_RE.search(line))
 
 
 def detect_ai_config_injection(code: str, file: str) -> list[Finding]:
     """只对 AI 指令文件路径检测（.cursor/rules、CLAUDE.md 等）。"""
     findings: list[Finding] = []
     hits: dict[re.Pattern, list[int]] = {}
-    for lineno, line in enumerate(code.splitlines(), start=1):
+    cfg_lines = code.splitlines()
+    for lineno, line in enumerate(cfg_lines, start=1):
+        window = line if lineno >= len(cfg_lines) else f"{line} {cfg_lines[lineno]}"
         for rx in _CONFIG_RE:
-            if rx.search(line):
+            if rx.search(window) and not _is_defensive(rx, line):
                 hits.setdefault(rx, []).append(lineno)
     for rx, lines in hits.items():
         match = rx.search(code.splitlines()[lines[0] - 1])
@@ -252,13 +275,35 @@ def is_doc_path(path: str) -> bool:
 _DOC_INJECT_RE = [re.compile(p) for p in _CONFIG_PATTERNS]
 
 
+def _quote_context(line: str, in_fence: bool) -> str:
+    """引用语境标注：围栏代码块 / 引用块 / 行内代码。检出不变，只给研判提示。"""
+    if in_fence:
+        return "fenced"
+    stripped = line.lstrip()
+    if stripped.startswith(">"):
+        return "blockquote"
+    if line.count("`") >= 2:
+        return "inline-code"
+    return ""
+
+
 def detect_doc_injection(code: str, file: str) -> list[Finding]:
     findings: list[Finding] = []
     hits: dict[re.Pattern, list[int]] = {}
-    for lineno, line in enumerate(code.splitlines(), start=1):
+    contexts: dict[int, str] = {}
+    doc_lines = code.splitlines()
+    in_fence = False
+    for lineno, line in enumerate(doc_lines, start=1):
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        context = _quote_context(line, in_fence)
+        window = line if lineno >= len(doc_lines) else f"{line} {doc_lines[lineno]}"
         for rx in _DOC_INJECT_RE:
-            if rx.search(line):
+            if rx.search(window) and not _is_defensive(rx, line):
                 hits.setdefault(rx, []).append(lineno)
+                contexts[lineno] = context
     for rx, lines in hits.items():
         match = rx.search(code.splitlines()[lines[0] - 1])
         evidence = match.group(0) if match else "doc injection pattern"
@@ -272,7 +317,10 @@ def detect_doc_injection(code: str, file: str) -> list[Finding]:
                 f"共 {len(lines)} 行出现）。文档是 Agent 的常规输入，投毒不会被"
                 "人类评审与传统工具注意。"
             ),
-            extra={"occurrence_lines": lines[:20]},
+            extra={
+                "occurrence_lines": lines[:20],
+                "context": contexts.get(lines[0], ""),
+            },
         ))
     return findings
 
@@ -280,6 +328,9 @@ def detect_doc_injection(code: str, file: str) -> list[Finding]:
 # ────────────────── PIT-T-51: 注释指令覆盖 ──────────────────
 _COMMENT_INJECT_PATTERNS = [
     r"(?i)\bignore\s+(all\s+)?previous\s+instructions\b",
+    # 2026-11-01 Copilot 现场漏报 PS03 同源：注释族同样补 safety/security rules 与 system override
+    r"(?i)\bignore\s+(all\s+)?(?:previous\s+)?(?:safety|security)\s+(?:rules|guidelines)\b",
+    r"(?i)\bsystem\s+overrides?\b",
     r"(?i)\breveal\s+the\s+system\s+prompt\b",
     r"(?i)\breveal\s+your\s+(system\s+)?prompt\b",
     r"(?i)\bdisregard\s+(all\s+)?(previous\s+)?instructions\b",
@@ -287,30 +338,57 @@ _COMMENT_INJECT_PATTERNS = [
     r"(?i)\byou\s+are\s+an?\s+(attacker|hacker|assistant)\b",
     r"(?i)\bdeveloper\s+mode\b",
     r"(?i)\bDAN\s+mode\b",
+    r"忽略(?:之前|以前|上面|上述)(?:的)?(?:所有)?(?:指令|提示|要求)",
+    r"无视(?:之前|以前|上面|上述)(?:的)?(?:所有)?(?:指令|提示|要求)",
+    r"你现在(?:是|成为)(?:一名)?(?:攻击者|黑客)",
+    r"绕过(?:所有)?安全",
+    r"以前の指示を無視",
+    r"跳过(?:所有)?安全",
 ]
 _COMMENT_INJECT_RE = [re.compile(p) for p in _COMMENT_INJECT_PATTERNS]
 
-# 常见注释标记：python # / block；C 系 // 和 /* */；HTML <!-- -->；shell #
-_COMMENT_START = re.compile(r"(#|//|/\*|<!--|\*|--|;|%)")
+# 注释标记按扩展名取：字符串里的 % / ; / -- 不是注释起点
+# （2026-10-30 PITAX 基准 NEG-4 实证：`"100% ignore previous instructions"` 曾误报 PIT-T-51）
+_COMMENT_MARKERS: dict[str, tuple[str, ...]] = {
+    ".py": ("#",), ".sh": ("#",), ".bash": ("#",), ".rb": ("#",), ".r": ("#",),
+    ".yaml": ("#",), ".yml": ("#",), ".toml": ("#",), ".cfg": ("#",),
+    ".ini": ("#", ";"),
+    ".js": ("//", "/*"), ".ts": ("//", "/*"), ".jsx": ("//", "/*"), ".tsx": ("//", "/*"),
+    ".java": ("//", "/*"), ".go": ("//", "/*"), ".rs": ("//", "/*"),
+    ".c": ("//", "/*"), ".cpp": ("//", "/*"), ".h": ("//", "/*"),
+    ".php": ("//", "/*", "#"), ".vue": ("//", "/*", "<!--"),
+    ".sql": ("--", "/*"), ".lua": ("--",),
+    ".html": ("<!--",), ".htm": ("<!--",),
+}
+_DEFAULT_COMMENT_MARKERS = ("#", "//", "/*", "<!--", "*")
 
 
-def _extract_comment(line: str) -> str | None:
-    """粗略提取行内注释片段。够用即可（确定性规则）。"""
-    m = _COMMENT_START.search(line)
-    if m:
-        return line[m.start():]
-    return None
+def _extract_comment(line: str, path: str = "") -> str | None:
+    """按扩展名取注释标记，返回最早出现的注释片段。"""
+    ext = os.path.splitext(path.lower())[1]
+    markers = _COMMENT_MARKERS.get(ext, _DEFAULT_COMMENT_MARKERS)
+    best = -1
+    for marker in markers:
+        idx = line.find(marker)
+        if idx >= 0 and (best < 0 or idx < best):
+            best = idx
+    return line[best:] if best >= 0 else None
 
 
 def detect_comment_injection(code: str, file: str) -> list[Finding]:
     findings: list[Finding] = []
     hits: dict[re.Pattern, list[int]] = {}
-    for lineno, line in enumerate(code.splitlines(), start=1):
-        comment = _extract_comment(line)
+    cm_lines = code.splitlines()
+    for lineno, line in enumerate(cm_lines, start=1):
+        comment = _extract_comment(line, file)
         if comment is None:
             continue
+        nxt = _extract_comment(cm_lines[lineno], file) if lineno < len(cm_lines) else None
+        # 去掉注释标记再拼接：跨行拆分常写成 "# ignore previous" / "# instructions"
+        body = comment.lstrip("#/*<!-> 	")
+        window = body if not nxt else f"{body} {nxt.lstrip('#/*<!-> 	')}"
         for rx in _COMMENT_INJECT_RE:
-            if rx.search(comment):
+            if rx.search(window):
                 hits.setdefault(rx, []).append(lineno)
     for rx, lines in hits.items():
         match = rx.search(code.splitlines()[lines[0] - 1])
@@ -338,13 +416,19 @@ _ENCODED_TARGET_PATTERNS = [
     r"(?i)\bdeveloper\s+mode\b",
     r"(?i)\byou\s+are\s+now\b",
     r"(?i)\bjailbreak\b",
+    r"你现在(?:是|成为)(?:一名)?(?:攻击者|黑客)",
+    r"绕过(?:所有)?安全",
+    r"以前の指示を無視",
+    r"忽略(?:之前|以前|上述)(?:的)?(?:所有)?指令",
 ]
 _ENCODED_TARGET_RE = [re.compile(p) for p in _ENCODED_TARGET_PATTERNS]
 
-# 字符串字面量候选：引号包裹的 20+ 字符串（不含引号/换行）。
+# 字符串字面量候选：引号包裹的 8+ 字符串（不含引号/换行；原 20——2026-10-31 基准 E36-2 实证9 字中文反转载荷漏检，误报由解码+关键词门控制）。
 # 不再限制字符集——编码判定交给分层解码器（b64 严格校验/rot13/reverse 命中关键词才剥层），
 # 否则带空格的 ROT13/反转载荷会漏检。
-_STR_LITERAL = re.compile(r'(["\'`])([^"\'`\n]{20,})\1')
+_STR_LITERAL = re.compile(r'(["\'`])([^"\'`\n]{8,})\1')
+# 2026-11-01 Copilot 现场漏报#3（CA03 实证）：载荷躲进注释——注释内容同样过剥层解码
+_COMMENT_TOKEN = re.compile(r"[A-Za-z0-9+/=]{16,}")
 _B64_STRICT = re.compile(r"[A-Za-z0-9+/]+={0,2}")
 _MIN_DECODE_LEN = 16
 _MAX_LAYERS = 5
@@ -413,20 +497,39 @@ def detect_encoded_payloads(code: str, file: str) -> list[Finding]:
             final, layers = _peel_layers(raw)
             if not layers or not _contains_injection(final):
                 continue  # 纯明文/未命中关键词 → 不报（控制误报）
-            if len(layers) >= 2:
-                pitax_code = "PIT-E-57"
-            else:
-                pitax_code = _LAYER_TO_CODE.get(tuple(layers), "PIT-E-57")
-            findings.append(Finding(
-                pitax_code=pitax_code,
-                file=file,
-                line=lineno,
-                evidence=raw[:80] + ("..." if len(raw) > 80 else ""),
-                message=(
-                    f"检测到{len(layers)}层编码（{'→'.join(layers)}）的提示注入载荷，"
-                    "用于规避基于关键词的过滤。"
-                ),
-                decoded_payload=final[:160],
-                extra={"layers": layers},
-            ))
+            findings.append(_encoded_finding(file, lineno, raw, final, layers))
+        # 注释内容同口径：取出注释体里的 base64 形 token 过剥层（解码+关键词双闸控制误报）
+        comment = _extract_comment(line, file)
+        if comment is None:
+            continue
+        body = comment.lstrip("#/*<!-> \t")
+        seen: set[str] = set()
+        for m in _COMMENT_TOKEN.finditer(body):
+            raw = m.group(0)
+            if raw in seen:
+                continue
+            seen.add(raw)
+            final, layers = _peel_layers(raw)
+            if not layers or not _contains_injection(final):
+                continue
+            findings.append(_encoded_finding(file, lineno, raw, final, layers))
     return findings
+
+
+def _encoded_finding(file: str, lineno: int, raw: str, final: str, layers: list[str]) -> Finding:
+    if len(layers) >= 2:
+        pitax_code = "PIT-E-57"
+    else:
+        pitax_code = _LAYER_TO_CODE.get(tuple(layers), "PIT-E-57")
+    return Finding(
+        pitax_code=pitax_code,
+        file=file,
+        line=lineno,
+        evidence=raw[:80] + ("..." if len(raw) > 80 else ""),
+        message=(
+            f"检测到{len(layers)}层编码（{'→'.join(layers)}）的提示注入载荷，"
+            "用于规避基于关键词的过滤。"
+        ),
+        decoded_payload=final[:160],
+        extra={"layers": layers},
+    )

@@ -33,7 +33,8 @@ SKILL_CARD = BUILD_DIR / "modelscope" / "skill-card.md"
 # 天禧专用文件，魔搭不需要
 EXCLUDE = {"package.json", "_meta.json", ".skill-config.json"}
 # 锚文件按发行内容重算（与天禧构建同口径）
-ANCHORED = ["engine/__init__.py", "engine/detectors.py", "engine/rules.py",
+ANCHORED = ["engine/__init__.py", "engine/detectors.py", "engine/descriptions_en.py",
+            "engine/report_lang.py", "engine/rules.py",
             "engine/sanitizer.py", "engine/sarif.py", "engine/scan.py",
             "engine/zh_rules.py", "entry.py"]
 
