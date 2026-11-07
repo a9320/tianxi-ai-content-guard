@@ -23,14 +23,16 @@ ENGINE = REPO / "skill" / "scripts" / "engine"
 
 
 def test_versions_130():
+    """版本锁改版本无关（五处互检；当版钉死见 test_v131_lockins）。"""
     front = (REPO / "skill" / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[1]
     v_skill = re.search(r"^version:\s*(\S+)$", front, re.M).group(1)
     v_pkg = json.loads((REPO / "skill" / "package.json").read_text(encoding="utf-8"))["version"]
     v_meta = json.loads((REPO / "skill" / "_meta.json").read_text(encoding="utf-8"))["version"]
     v_cfg = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["version"]
-    assert {v_skill, v_pkg, v_meta, v_cfg} == {"1.3.0"}
+    assert v_skill == v_pkg == v_meta == v_cfg
     entry = (REPO / "skill" / "scripts" / "entry.py").read_text(encoding="utf-8")
-    assert 'SKILL_VERSION = "1.3.0"' in entry
+    m = re.search(r'SKILL_VERSION = "(\S+)"', entry)
+    assert m and m.group(1) == v_skill
 
 
 def test_english_descriptions_vendored():
