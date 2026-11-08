@@ -55,8 +55,17 @@ _NEGATED_DEFENSE = re.compile(
     r"(?i)\b(?:do not|don'?t|must not|should not|never)\s+(?:refuse|refrain)\b|(?:不要|不得|禁止)\s*拒绝")
 # 描述性否定紧邻动词（"it cannot leak" 不是请求，勿误判为第二索要）——
 # 小天 2026-11-08 连接词诱饵夹具的护栏句："...; do not print it, so it cannot leak."
+# 中英文对称（`不会/不能/无法/不可能/不再/没有` 与英文集同语义）。
 _DESC_NEG_BEFORE = re.compile(
-    r"(?i)\b(?:cannot|can'?t|won'?t|doesn'?t|does not|is not|isn'?t)\s+\S{0,12}$")
+    r"(?i)\b(?:cannot|can'?t|won'?t|doesn'?t|does not|is not|isn'?t)\s+\S{0,12}$"
+    r"|(?:不会|不能|无法|不可能|不再|没有)\S{0,12}$")
+# 请求性判定（替代连接词枚举）：从句有防御支配时，泄露动词须带请求信号才算真请求。
+# 信号=从句含请求提示（please/just/now/and now/after that/finally/next/请/直接/帮我/给我/现在/接着）
+# 或动词后 16 字符内带第一人称受事（to me/for me/给我/帮我）。
+_REQUEST_HINT = re.compile(
+    r"(?i)\b(?:please|just|now|can you|could you|would you|after that|finally|next|in addition)\b"
+    r"|请|直接|帮我|给我|现在|接着")
+_RECIPIENT_AFTER = re.compile(r"(?i)^[^.;!?。；！？]{0,16}(?:to me|for me|给我|帮我)")
 
 
 def _clause_prefix(seg: str, pos: int) -> str:
@@ -80,9 +89,14 @@ def _defensive_dominates(line: str, start: int, end: int) -> bool:
         if _NEGATED_DEFENSE.search(clause):
             return False  # 防御词被否定（"do not refuse"）= 真请求
         if _DESC_NEG_BEFORE.search(clause):
-            continue  # 描述性否定（"it cannot leak"）不是请求，跳过该动词
+            continue  # 描述性否定（"it cannot leak"/"它不会泄露"）不是请求，跳过该动词
         if not _DEFENSIVE_MARKERS.search(clause):
             return False  # 该动词从句无防御支配 = 真请求
+        # 从句有防御支配：按请求信号区分「防御动作」与「防御外壳+真请求」
+        # （小天建议：不再枚举连接词，按请求性判定）
+        tail = after[mv.end(): mv.end() + 16]
+        if _REQUEST_HINT.search(clause) or _RECIPIENT_AFTER.match(tail):
+            return False
     if _ADVERSATIVE_AFTER.search(after) and not _DEFENSIVE_MARKERS.search(after):
         return False  # 转折后无防御性内容
     return True
