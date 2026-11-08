@@ -49,25 +49,27 @@ def test_three_mechanical_self_checks():
 
 
 def test_trigger_surface_covers_script_and_config():
+    """v1.3.2 收窄后：脚本/配置类覆盖由边界标记承载（显式例子随 #30 移除）。"""
     front = SKILL_MD.split("---", 2)[1]
     assert "脚本" in front and "配置文件" in front
-    assert "这个脚本是干什么的" in front
-    assert "这个配置文件写得对不对" in front
+    assert "待安装的仓库与脚本" in front
+    assert "未审计的 AI 配置" in front
 
 
 def test_skill_listing_within_300_chars():
     """自限 300 字：宿主上限未验证；实测 v1.2.6 的 292 字清单完整注入。
 
-    F02 两个示例必须留在 300 字之前，防止未来改写把它们推到截断点之后。
+    v1.3.2 触发面收窄（ClawHub 扫描 C 项 #30）：显式例子改为"外部/不可信
+    来源"边界标记，仍须留在 300 字之前。
     """
     front = SKILL_MD.split("---", 2)[1]
     desc = re.search(r'^description:\s*"(.+)"$', front, re.M).group(1)
     when = re.search(r'^when-to-use:\s*"(.+)"$', front, re.M).group(1)
     line = f"- ai-content-guard: {desc} - {when}"
     assert len(line) <= 300, f"清单行 {len(line)} 字 > 300，尾部可能被截断"
-    for example in ("这个脚本是干什么的", "这个配置文件写得对不对"):
-        end = line.find(example) + len(example)
-        assert end <= 300, f"F02 示例「{example}」结束于 {end}，超出 300 字预算"
+    for marker in ("收到的邮件", "待安装的仓库与脚本"):
+        end = line.find(marker) + len(marker)
+        assert 0 < end <= 300, f"收窄标记「{marker}」结束于 {end}，超出 300 字预算"
 
 
 def test_zero_original_core_not_removed():

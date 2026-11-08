@@ -57,14 +57,16 @@ def _leak_hits(text):
 
 
 def test_versions_131():
+    """版本锁改版本无关（五处互检；当版钉死见 test_v132_lockins）。"""
     front = (REPO / "skill" / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[1]
     v_skill = re.search(r"^version:\s*(\S+)$", front, re.M).group(1)
     v_pkg = json.loads((REPO / "skill" / "package.json").read_text(encoding="utf-8"))["version"]
     v_meta = json.loads((REPO / "skill" / "_meta.json").read_text(encoding="utf-8"))["version"]
     v_cfg = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["version"]
-    assert {v_skill, v_pkg, v_meta, v_cfg} == {"1.3.1"}
+    assert v_skill == v_pkg == v_meta == v_cfg
     entry = (REPO / "skill" / "scripts" / "entry.py").read_text(encoding="utf-8")
-    assert 'SKILL_VERSION = "1.3.1"' in entry
+    m = re.search(r'SKILL_VERSION = "(\S+)"', entry)
+    assert m and m.group(1) == v_skill
 
 
 def test_bypass_samples_malicious():
@@ -183,7 +185,8 @@ def test_dominance_unit():
 
 
 def test_notes_correction():
-    """口径更正必须入 notes：教材引用仍 high，不得写『不再误报』。"""
+    """口径更正的持久记录在 security-notes 已知边界表（updateNotes 随版本演进）。"""
+    notes_doc = (REPO / "skill" / "references" / "security-notes.md").read_text(encoding="utf-8")
+    assert "安全教材" in notes_doc and "PIT-N-06 high" in notes_doc
     notes = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["updateNotes"]
-    assert "教材引用" in notes and "仍报 high" in notes
     assert "教材引用类不再误报" not in notes

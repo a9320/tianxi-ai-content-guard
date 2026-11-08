@@ -11,11 +11,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SKILL_MD = (REPO / "skill" / "SKILL.md").read_text(encoding="utf-8")
 EXAMPLES = (
-    "这个脚本是干什么的",
-    "这个配置文件写得对不对",
-    "按 README 安装仓库",
-    "翻译消息文件",
-    "整理仓库问题清单",
+    # v1.3.2 触发面收窄（ClawHub 扫描 C 项 #30，小天分诊）：显式例子从普通任务
+    # 列举改为"外部/不可信来源"边界标记；F02/I03 类触发行为由"读取/总结/翻译…
+    # 外部或不可信来源的内容"覆盖，下一轮触发探针须复验。
+    "收到的邮件",
+    "下载的文档",
+    "待安装的仓库与脚本",
+    "未审计的 AI 配置",
 )
 
 

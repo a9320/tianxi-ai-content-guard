@@ -55,7 +55,11 @@ def _emoji_zwj_guard(findings: list[dict], content: str) -> list[dict]:
 
 
 def scan_file(path: str, content: str, _n: int = 0) -> list[dict]:
-    """单文件扫描：全量基础检测 + 按路径追加 + 中文/劫持覆盖层。永不抛异常。"""
+    """单文件扫描：全量基础检测 + 按路径追加 + 中文/劫持覆盖层。永不抛异常。
+
+    全阶段容错（ClawHub 扫描 C 项 #35）：报告转换/emoji 后处理/覆盖层不因
+    单阶段异常中断整个扫描——各阶段独立 try，失败阶段置空并继续。
+    """
     raw: list = []
     try:
         raw += detect_invisible_text(content, path)
@@ -68,11 +72,23 @@ def scan_file(path: str, content: str, _n: int = 0) -> list[dict]:
         else:
             raw += detect_comment_injection(content, path)
     except Exception:
+        raw = []
+    try:
+        findings = [f.to_report_dict(f"pitax-{_n}-{i}") for i, f in enumerate(raw, start=1)]
+    except Exception:
+        findings = []
+    try:
+        findings = _emoji_zwj_guard(findings, content)
+    except Exception:
         pass
-    findings = [f.to_report_dict(f"pitax-{_n}-{i}") for i, f in enumerate(raw, start=1)]
-    findings = _emoji_zwj_guard(findings, content)
-    findings += scan_zh(content, path, _n=_n)
-    findings += scan_encoded_zh(content, path, _n=_n)
+    try:
+        findings += scan_zh(content, path, _n=_n)
+    except Exception:
+        pass
+    try:
+        findings += scan_encoded_zh(content, path, _n=_n)
+    except Exception:
+        pass
     return findings
 
 

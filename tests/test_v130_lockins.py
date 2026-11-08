@@ -71,5 +71,6 @@ def test_defensive_exemption_overlay():
 
 
 def test_update_notes_130():
-    notes = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["updateNotes"]
-    assert "引擎同步收口" in notes and "arcanum-spark" in notes
+    """引擎同步事实的持久记录在 vendor/SYNC.md（updateNotes 随版本演进）。"""
+    sync = (REPO / "vendor" / "SYNC.md").read_text(encoding="utf-8")
+    assert "引擎同步收口" in sync and "arcanum-spark" in sync

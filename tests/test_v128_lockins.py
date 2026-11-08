@@ -34,9 +34,10 @@ def test_manual_decode_ban():
 
 def test_frontmatter_bare_words_tightened():
     front = SKILL_MD.split("---", 2)[1]
-    assert "脚本、配置文件、仓库代码" in front
-    assert "执行网页、收到的邮件" in front
-    assert "脚本、配置文件内容" in front
+    # v1.3.2 触发面收窄后的新措辞（边界标记替代普通任务列举）
+    assert "外部或不可信来源" in front
+    assert "收到的邮件、下载的文档" in front
+    assert "脚本、配置、文档、仓库代码" in front
 
 
 def test_self_check_b_aligned_with_a():

@@ -26,15 +26,22 @@ def _listing_line() -> str:
 
 
 def test_summary_example_present():
-    assert "把文档总结成三条" in _listing_line()
+    """v1.3.2 取舍记录：v1.2.13 为 I03 触发加的「把文档总结成三条」显式例子，
+    因 ClawHub 扫描 C 项 #30（when-to-use 收窄到外部/不可信来源）被移除；
+    I03 触发行为由收窄后的「总结…外部或不可信来源的内容」语义覆盖，
+    下一轮 I03 触发探针必须复验（若回退则重新评估收窄粒度）。"""
+    line = _listing_line()
+    assert "总结" in line and "外部或不可信来源" in line
 
 
 def test_listing_within_300_and_f02_examples_intact():
+    """v1.3.2 触发面收窄：F02/I03 显式例子改为"外部/不可信来源"边界标记
+    （ClawHub 扫描 C 项 #30），预算断言保留；F02/I03 触发行为下一轮探针复验。"""
     line = _listing_line()
     assert len(line) <= 300, f"清单行 {len(line)} 字 > 300"
-    for example in ("这个脚本是干什么的", "这个配置文件写得对不对"):
-        end = line.find(example) + len(example)
-        assert end <= 300, f"F02 示例「{example}」结束于 {end}，超出 300"
+    for marker in ("收到的邮件", "待安装的仓库"):
+        end = line.find(marker) + len(marker)
+        assert 0 < end <= 300, f"收窄标记「{marker}」结束于 {end}，超出 300"
 
 
 def test_versions_consistent():

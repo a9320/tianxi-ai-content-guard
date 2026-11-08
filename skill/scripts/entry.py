@@ -52,7 +52,7 @@ from engine.sarif import build_sarif  # noqa: E402
 from engine.scan import scan_file, scan_repo  # noqa: E402
 
 SKILL_NAME = "ai-content-guard"
-SKILL_VERSION = "1.3.1"
+SKILL_VERSION = "1.3.2"
 SCHEMA_VERSION = "1.0"
 
 # ── 扫描防护上限（对齐 docs/design-decisions.md 八条）──
@@ -74,10 +74,12 @@ _SYSTEM_DIRS = [
 
 # 敏感文件：只报存在，绝不读内容、不展示内容
 _SENSITIVE_PATTERNS = [
-    ".env", ".env.*", "*.pem", "*.key", "id_rsa*", "id_ed25519*",
+    ".env", ".env.*", "*.env", "*.pem", "*.key", "id_rsa*", "id_ed25519*",
     "credentials*", "cookies*", "Login Data", "*.sqlite", "*.db",
     "NTDS.dit", "SAM", "SECURITY", "*.kdbx", "*.pfx", "*.p12", "*.wallet",
 ]
+# 注：`*.env` 覆盖 secret.env / prod.env 等任意命名（2026-11-08 ClawHub 扫描 C 项 #14：
+# 原名单只有 `.env`/`.env.*`，`secret.env` 会被当普通文本读取）
 
 # 产品级跳过目录：比引擎管线口径更窄——dist/build/node_modules 属分发内容，
 # 对内容安检恰好是攻击者藏身处（复测 §3.4），必须扫；只跳 VCS 内部与缓存。
@@ -181,8 +183,14 @@ def _read_file_bytes(path: Path) -> bytes:
 
 
 def _guard_file(fpath: Path) -> None:
-    """file mode 防护（P0-3）：系统目录拒绝 + 敏感文件拒绝，与 dir mode 同口径。"""
+    """file mode 防护（P0-3）：系统目录拒绝 + 敏感文件拒绝 + 符号链接不跟随，与 dir mode 同口径。"""
+    # 防护②：先于 resolve() 检查符号链接（ClawHub 扫描 C 项 #37：resolve 会跟随链接，
+    # 之后的检查落在链接目标上，原始链接信息丢失=no-follow 文档承诺失效）
+    if fpath.is_symlink():
+        raise ValueError(f"符号链接不跟随（file mode）：{fpath}")
     resolved = fpath.resolve()
+    if resolved != fpath.absolute() and resolved.is_symlink():
+        raise ValueError(f"符号链接不跟随（file mode）：{fpath}")
     for d in _SYSTEM_DIRS:
         try:
             if _is_under(resolved, d.expanduser().resolve()):
@@ -743,10 +751,13 @@ def main(argv: list[str] | None = None) -> int:
                                 "提供非空内容")
                 findings, coverage, errors = collect_text(stdin_text)
             else:
-                fpath = Path(args.file).expanduser().resolve()
+                fpath = Path(args.file).expanduser()
                 if not fpath.is_file():
                     return _err("NOT_FOUND", "file", f"文件不存在：{fpath}")
+                # 先防护后 resolve（#37）：guard 内部先查 symlink 再 resolve，
+                # 与 dir mode 的 no-follow 承诺同口径
                 _guard_file(fpath)  # P0-3：file mode 与 dir mode 同防护口径
+                fpath = fpath.resolve()
                 # 传保留路径结构的字符串（非 basename），让 .cursor/rules 等
                 # AI 配置路径在单文件模式下仍可识别（P0-2）
                 path_hint = args.file.replace("\\", "/")
