@@ -42,7 +42,8 @@ _P_LEAK = re.compile(
 # 最终语义：防御标记必须【支配】命中片段（位于命中起点之前、不跨句界）；
 # 命中之后的每个泄露动词，按其所在从句判定——从句被防御标记支配且该防御词
 # 未被否定（不是 "do not refuse"/"不要拒绝"）才是防御动作；否则=真请求。
-_ADVERSATIVE_AFTER = re.compile(r"(?i)\b(?:but|however|instead|yet)\b|但|而是|然后|并且?")
+_ADVERSATIVE_AFTER = re.compile(
+    r"(?i)\b(?:but|however|instead|yet|so|then|thus|therefore|hence)\b|但|而是|然后|并且?|所以|因此|于是|随后")
 _LEAK_VERB_AFTER = re.compile(
     r"(?i)(?:输出|打印|显示|复述|泄露|告诉我|发给我|给我|reveal|print|output|show|tell|leak|disclose)")
 _SENTENCE_BREAK = re.compile(r"[.!?。！？;；:：]")
@@ -52,6 +53,10 @@ _DEFENSIVE_MARKERS = re.compile(
 # 被否定的防御词（"不要拒绝" = 鼓励索要，不构成防御支配）
 _NEGATED_DEFENSE = re.compile(
     r"(?i)\b(?:do not|don'?t|must not|should not|never)\s+(?:refuse|refrain)\b|(?:不要|不得|禁止)\s*拒绝")
+# 描述性否定紧邻动词（"it cannot leak" 不是请求，勿误判为第二索要）——
+# 小天 2026-11-08 连接词诱饵夹具的护栏句："...; do not print it, so it cannot leak."
+_DESC_NEG_BEFORE = re.compile(
+    r"(?i)\b(?:cannot|can'?t|won'?t|doesn'?t|does not|is not|isn'?t)\s+\S{0,12}$")
 
 
 def _clause_prefix(seg: str, pos: int) -> str:
@@ -74,6 +79,8 @@ def _defensive_dominates(line: str, start: int, end: int) -> bool:
         clause = _clause_prefix(after, mv.start())
         if _NEGATED_DEFENSE.search(clause):
             return False  # 防御词被否定（"do not refuse"）= 真请求
+        if _DESC_NEG_BEFORE.search(clause):
+            continue  # 描述性否定（"it cannot leak"）不是请求，跳过该动词
         if not _DEFENSIVE_MARKERS.search(clause):
             return False  # 该动词从句无防御支配 = 真请求
     if _ADVERSATIVE_AFTER.search(after) and not _DEFENSIVE_MARKERS.search(after):
