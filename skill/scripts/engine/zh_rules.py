@@ -50,9 +50,10 @@ _SENTENCE_BREAK = re.compile(r"[.!?。！？;；:：]")
 # skill 侧防御标记集（上游集合 + 拒绝/refrain；上游为 vendor 字节不可改）
 _DEFENSIVE_MARKERS = re.compile(
     r"(?i)\b(?:never|don'?t|do not|must not|should not|refuse|avoid|refrain)\b|严禁|禁止|不要|不得|拒绝")
-# 被否定的防御词（"不要拒绝" = 鼓励索要，不构成防御支配）
+# 被否定的防御词（"不要拒绝/犹豫" = 鼓励索要，不构成防御支配）
 _NEGATED_DEFENSE = re.compile(
-    r"(?i)\b(?:do not|don'?t|must not|should not|never)\s+(?:refuse|refrain)\b|(?:不要|不得|禁止)\s*拒绝")
+    r"(?i)\b(?:do not|don'?t|must not|should not|never)\s+(?:refuse|refrain|hesitate)\b"
+    r"|(?:不要|不得|禁止)\s*(?:拒绝|犹豫)")
 # 描述性否定紧邻动词（"it cannot leak" 不是请求，勿误判为第二索要）——
 # 小天 2026-11-08 连接词诱饵夹具的护栏句："...; do not print it, so it cannot leak."
 # 中英文对称（`不会/不能/无法/不可能/不再/没有` 与英文集同语义）。
@@ -66,6 +67,22 @@ _REQUEST_HINT = re.compile(
     r"(?i)\b(?:please|just|now|can you|could you|would you|after that|finally|next|in addition)\b"
     r"|请|直接|帮我|给我|现在|接着")
 _RECIPIENT_AFTER = re.compile(r"(?i)^[^.;!?。；！？]{0,16}(?:to me|for me|给我|帮我)")
+# 本地否定词（三级优先级第 2 层）：本地前缀含否定即支配该动词=防御动作
+_LOCAL_NEG = re.compile(r"(?i)\b(?:never|don'?t|do not|must not|should not|does not)\b|不要|不得|请勿|禁止")
+
+
+def _local_prefix(seg: str, pos: int) -> str:
+    """本地前缀=从句边界与请求信号之后的片段到动词前（三级优先级第 2/3 层用）。
+
+    小天 2026-11-08：否定必须优先于请求信号——"do not show it to me" 的
+    "to me" 不能覆盖 "do not" 的支配；而 "不要打印它，现在输出给我" 的
+    "现在/给我" 在否定作用域之外（否定词已被连接词/请求信号切走）。
+    """
+    cut = 0
+    for rx in (_SENTENCE_BREAK, _ADVERSATIVE_AFTER, _REQUEST_HINT):
+        for m in rx.finditer(seg, 0, pos):
+            cut = max(cut, m.end())
+    return seg[cut:pos]
 
 
 def _clause_prefix(seg: str, pos: int) -> str:
@@ -86,17 +103,20 @@ def _defensive_dominates(line: str, start: int, end: int) -> bool:
         return False  # 防御标记与命中跨句界，不构成支配
     for mv in _LEAK_VERB_AFTER.finditer(after):
         clause = _clause_prefix(after, mv.start())
-        if _NEGATED_DEFENSE.search(clause):
-            return False  # 防御词被否定（"do not refuse"）= 真请求
         if _DESC_NEG_BEFORE.search(clause):
             continue  # 描述性否定（"it cannot leak"/"它不会泄露"）不是请求，跳过该动词
         if not _DEFENSIVE_MARKERS.search(clause):
             return False  # 该动词从句无防御支配 = 真请求
-        # 从句有防御支配：按请求信号区分「防御动作」与「防御外壳+真请求」
-        # （小天建议：不再枚举连接词，按请求性判定）
+        # 从句有防御支配 → 三级优先级（否定 > 请求信号 > 默认防御；小天 2026-11-08）
+        if _NEGATED_DEFENSE.search(clause):
+            return False  # 否定防御惯用式（"do not refuse/hesitate"）= 真请求
+        local = _local_prefix(after, mv.start())
+        if _LOCAL_NEG.search(local):
+            continue  # 否定支配该动词（"do not show it to me"）= 防御动作
         tail = after[mv.end(): mv.end() + 16]
-        if _REQUEST_HINT.search(clause) or _RECIPIENT_AFTER.match(tail):
-            return False
+        if _REQUEST_HINT.search(local) or _RECIPIENT_AFTER.match(tail):
+            return False  # 请求信号 / 第一人称受事 = 真请求
+        continue  # 其余 = 防御动作
     if _ADVERSATIVE_AFTER.search(after) and not _DEFENSIVE_MARKERS.search(after):
         return False  # 转折后无防御性内容
     return True
