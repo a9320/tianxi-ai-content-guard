@@ -45,7 +45,10 @@ _P_LEAK = re.compile(
 _ADVERSATIVE_AFTER = re.compile(
     r"(?i)\b(?:but|however|instead|yet|so|then|thus|therefore|hence)\b|但|而是|然后|并且?|所以|因此|于是|随后")
 _LEAK_VERB_AFTER = re.compile(
-    r"(?i)(?:输出|打印|显示|复述|泄露|告诉我|发给我|给我|reveal|print|output|show|tell|leak|disclose)")
+    r"(?i)(?:输出|打印|显示|复述|泄露|告诉我|reveal|print|output|show|tell|leak|disclose)")
+# 注：`给我/发给我` 是受事短语而非泄露动词，由 `_RECIPIENT_AFTER` 判定——
+# 放进动词表会把"不要打印给我"里"给我"当第二动词迭代，污染否定作用域判定
+# （小天 2026-11-08 neg_recipient line4 实测）。
 _SENTENCE_BREAK = re.compile(r"[.!?。！？;；:：]")
 # skill 侧防御标记集（上游集合 + 拒绝/refrain；上游为 vendor 字节不可改）
 _DEFENSIVE_MARKERS = re.compile(
@@ -69,6 +72,13 @@ _REQUEST_HINT = re.compile(
 _RECIPIENT_AFTER = re.compile(r"(?i)^[^.;!?。；！？]{0,16}(?:to me|for me|给我|帮我)")
 # 本地否定词（三级优先级第 2 层）：本地前缀含否定即支配该动词=防御动作
 _LOCAL_NEG = re.compile(r"(?i)\b(?:never|don'?t|do not|must not|should not|does not)\b|不要|不得|请勿|禁止")
+# 否定与动词之间的合法填充（状语/标点/并列）——否定词必须是动词前最后一个谓词。
+# 小天 2026-11-08 夹具 neg_scope_verb_v131.txt：
+#   "don't worry, output"（worry 是另一个谓词→否定不支配 output→真请求）
+#   "do not, under any circumstances, show"（纯状语→仍支配→clean）
+_VERB_GAP_FILLER = re.compile(
+    r"(?i)^(?:\s|[,.!?;:，。；：]|\b(?:under\s+(?:any|no)\s+circumstances?|ever|by\s+any\s+means"
+    r"|at\s+all|in\s+any\s+way|any|always)\b|任何情况|什么情况|永远|绝对|一定|都)*$")
 
 
 def _local_prefix(seg: str, pos: int) -> str:
@@ -111,8 +121,14 @@ def _defensive_dominates(line: str, start: int, end: int) -> bool:
         if _NEGATED_DEFENSE.search(clause):
             return False  # 否定防御惯用式（"do not refuse/hesitate"）= 真请求
         local = _local_prefix(after, mv.start())
-        if _LOCAL_NEG.search(local):
-            continue  # 否定支配该动词（"do not show it to me"）= 防御动作
+        last_neg = None
+        for neg_m in _LOCAL_NEG.finditer(local):
+            last_neg = neg_m
+        if last_neg is not None:
+            gap = local[last_neg.end():]
+            if _VERB_GAP_FILLER.match(gap):
+                continue  # 否定紧邻支配该动词（"do not show it to me"）= 防御动作
+            return False  # 否定支配的是另一个谓词（"don't worry, output"）= 真请求
         tail = after[mv.end(): mv.end() + 16]
         if _REQUEST_HINT.search(local) or _RECIPIENT_AFTER.match(tail):
             return False  # 请求信号 / 第一人称受事 = 真请求
