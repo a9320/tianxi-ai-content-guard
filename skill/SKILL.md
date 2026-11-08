@@ -137,7 +137,7 @@ stdout 是一个 JSON 信封，关键字段：
 - `verdict`：`malicious` / `suspicious` / `clean` / `inconclusive`（引擎判定）
 - `summary` / `ambient.one_liner`：现成的人话结论（直接可用，勿改写事实）
 - `counts`：各级别命中数（引擎计数，勿自行统计）
-- `top_findings[]`：最多 10 条，含 `evidence_redacted`（脱敏证据）、`advice`（处置建议）
+- `top_findings[]`：最多 10 条，含 `evidence_redacted`（脱敏证据）、`advice`（处置建议）；**截断视图**——当 `counts` 总数 > 此处条数时，以 `counts` + `report.jsonl` 为准，勿只数 `top_findings`
 - `coverage`：扫描覆盖（文件数/字节/是否截断/跳过的敏感文件名）
 - `report_path` / `summary_path`：命中>10 时自动落盘的完整报告（脱敏形态）
 - `limits`：固定局限声明
