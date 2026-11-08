@@ -52,7 +52,7 @@ from engine.sarif import build_sarif  # noqa: E402
 from engine.scan import scan_file, scan_repo  # noqa: E402
 
 SKILL_NAME = "ai-content-guard"
-SKILL_VERSION = "1.3.2"
+SKILL_VERSION = "1.3.3"
 SCHEMA_VERSION = "1.0"
 
 # ── 扫描防护上限（对齐 docs/design-decisions.md 八条）──
@@ -735,6 +735,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.text is not None and not args.text.strip():
         return _err("INVALID_ARGUMENT", "text", "待检文本为空",
                     "提供非空内容，或用 --file 指定文件")
+
+    # v1.3.3 扫描限制参数范围校验（外部评审 B：负数/异常值导致扫描行为偏离预期）
+    for flag, val, lo, hi in (("max-files", args.max_files, 1, 100000),
+                              ("max-bytes", args.max_bytes, 1, 1 << 30),
+                              ("max-depth", args.max_depth, 1, 512),
+                              ("timeout", args.timeout, 1, 3600)):
+        if not lo <= val <= hi:
+            return _err("INVALID_ARGUMENT", flag, f"{flag}={val} 超出允许范围",
+                        f"取值须为 {lo}..{hi} 的整数")
 
     started = time.monotonic()
     findings: list[dict] = []

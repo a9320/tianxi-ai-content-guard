@@ -100,11 +100,12 @@ def test_c38_verdict_template_i18n():
 
 
 def test_versions_132():
+    # v1.3.3 起版本钉移交 test_v133_lockins（本测试改版本无关，沿 v1.2.13 先例）
     front = SKILL_MD.split("---", 2)[1]
     v_skill = re.search(r"^version:\s*(\S+)$", front, re.M).group(1)
     v_pkg = PKG["version"]
     v_meta = json.loads((REPO / "skill" / "_meta.json").read_text(encoding="utf-8"))["version"]
     v_cfg = json.loads((REPO / "skill" / ".skill-config.json").read_text(encoding="utf-8"))["version"]
-    assert {v_skill, v_pkg, v_meta, v_cfg} == {"1.3.2"}
+    assert {v_skill, v_pkg, v_meta, v_cfg} == {v_skill}
     entry = (REPO / "skill" / "scripts" / "entry.py").read_text(encoding="utf-8")
-    assert 'SKILL_VERSION = "1.3.2"' in entry
+    assert f'SKILL_VERSION = "{v_skill}"' in entry
