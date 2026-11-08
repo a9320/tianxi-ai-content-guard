@@ -1,0 +1,4 @@
+# 测试依赖（运行时零依赖；仅 pytest 用于开发/CI）
+# 用法：python -m venv .venv && .venv/Scripts/pip install -r tests/requirements-dev.txt
+#      .venv/Scripts/python -m pytest tests/ -q
+pytest>=8.0
